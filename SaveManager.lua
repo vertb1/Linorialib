@@ -83,31 +83,54 @@ local SaveManager = {} do
 			return false, 'no config file is selected'
 		end
 
+		-- Sanitize file name to prevent file system issues
+		name = name:gsub('[%p%c]', '')
+		
 		local fullPath = self.Folder .. '/settings/' .. name .. '.json'
 
 		local data = {
-			objects = {}
+			objects = {},
+			version = '1.0.0' -- Adding version tracking for future compatibility
 		}
 
+		-- Add error handling for nil values
 		for idx, toggle in next, Toggles do
 			if self.Ignore[idx] then continue end
+			if not toggle or not toggle.Type then continue end
 
-			table.insert(data.objects, self.Parser[toggle.Type].Save(idx, toggle))
+			local success, result = pcall(function()
+				return self.Parser[toggle.Type].Save(idx, toggle)
+			end)
+
+			if success and result then
+				table.insert(data.objects, result)
+			end
 		end
 
 		for idx, option in next, Options do
 			if not self.Parser[option.Type] then continue end
 			if self.Ignore[idx] then continue end
+			if not option or not option.Type then continue end
 
-			table.insert(data.objects, self.Parser[option.Type].Save(idx, option))
-		end	
+			local success, result = pcall(function()
+				return self.Parser[option.Type].Save(idx, option)
+			end)
+
+			if success and result then
+				table.insert(data.objects, result)
+			end
+		end    
 
 		local success, encoded = pcall(httpService.JSONEncode, httpService, data)
 		if not success then
 			return false, 'failed to encode data'
 		end
 
-		writefile(fullPath, encoded)
+		local success, err = pcall(writefile, fullPath, encoded)
+		if not success then
+			return false, 'failed to write file: ' .. tostring(err)
+		end
+
 		return true
 	end
 
@@ -119,12 +142,29 @@ local SaveManager = {} do
 		local file = self.Folder .. '/settings/' .. name .. '.json'
 		if not isfile(file) then return false, 'invalid file' end
 
-		local success, decoded = pcall(httpService.JSONDecode, httpService, readfile(file))
+		local success, content = pcall(readfile, file)
+		if not success then
+			return false, 'failed to read file'
+		end
+
+		local success, decoded = pcall(httpService.JSONDecode, httpService, content)
 		if not success then return false, 'decode error' end
+
+		-- Version check (for future compatibility)
+		if decoded.version and decoded.version ~= '1.0.0' then
+			self.Library:Notify('Loading config from different version', 2)
+		end
 
 		for _, option in next, decoded.objects do
 			if self.Parser[option.type] then
-				task.spawn(function() self.Parser[option.type].Load(option.idx, option) end) -- task.spawn() so the config loading wont get stuck.
+				task.spawn(function()
+					local success, err = pcall(function()
+						self.Parser[option.type].Load(option.idx, option)
+					end)
+					if not success then
+						warn('Failed to load option:', option.idx, err)
+					end
+				end)
 			end
 		end
 
@@ -203,8 +243,16 @@ local SaveManager = {} do
 
 		local section = tab:AddRightGroupbox('Configuration')
 
-		section:AddInput('SaveManager_ConfigName',    { Text = 'Config name' })
-		section:AddDropdown('SaveManager_ConfigList', { Text = 'Config list', Values = self:RefreshConfigList(), AllowNull = true })
+		section:AddInput('SaveManager_ConfigName', { 
+			Text = 'Config name',
+			PlaceholderText = 'config name here'
+		})
+		
+		section:AddDropdown('SaveManager_ConfigList', { 
+			Text = 'Config list', 
+			Values = self:RefreshConfigList(), 
+			AllowNull = true 
+		})
 
 		section:AddDivider()
 
@@ -217,13 +265,14 @@ local SaveManager = {} do
 
 			local success, err = self:Save(name)
 			if not success then
-				return self.Library:Notify('Failed to save config: ' .. err)
+				return self.Library:Notify('Failed to save config: ' .. err, 2)
 			end
 
 			self.Library:Notify(string.format('Created config %q', name))
 
-			Options.SaveManager_ConfigList:SetValues(self:RefreshConfigList())
+			Options.SaveManager_ConfigList.Values = self:RefreshConfigList()
 			Options.SaveManager_ConfigList:SetValue(nil)
+			Options.SaveManager_ConfigName:SetValue('')
 		end):AddButton('Load config', function()
 			local name = Options.SaveManager_ConfigList.Value
 
