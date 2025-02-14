@@ -3178,19 +3178,16 @@ function Library:CreateWindow(...)
                 Tab:HideTab();
             end;
 
-            TabFrame.Visible = true;
             Blocker.BackgroundTransparency = 0;
-            TabButton.BackgroundColor3 = Library.SelectedTabColor;
-            TabButtonLabel.TextColor3 = Library.AccentColor;
+            TabButton.BackgroundColor3 = Library.MainColor;
             TabAccentLine.Visible = true;
-            Library.RegistryMap[TabButton].Properties.BackgroundColor3 = 'SelectedTabColor';
+            Library.RegistryMap[TabButton].Properties.BackgroundColor3 = 'MainColor';
             TabFrame.Visible = true;
         end;
 
         function Tab:HideTab()
             Blocker.BackgroundTransparency = 1;
             TabButton.BackgroundColor3 = Library.BackgroundColor;
-            TabButtonLabel.TextColor3 = Library.FontColor;
             TabAccentLine.Visible = false;
             Library.RegistryMap[TabButton].Properties.BackgroundColor3 = 'BackgroundColor';
             TabFrame.Visible = false;
