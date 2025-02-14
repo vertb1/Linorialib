@@ -2797,8 +2797,8 @@ do
 
     local KeybindLabel = Library:CreateLabel({
         Size = UDim2.new(1, 0, 0, 20);
-        Position = UDim2.fromOffset(0, 2),
-        TextXAlignment = Enum.TextXAlignment.Center,
+        Position = UDim2.fromOffset(5, 2),
+        TextXAlignment = Enum.TextXAlignment.Left,
 
         Text = 'Keybinds';
         ZIndex = 104;
@@ -3079,20 +3079,6 @@ function Library:CreateWindow(...)
             BorderColor3 = 'OutlineColor';
         });
 
-        local TabAccentLine = Library:Create('Frame', {
-            BackgroundColor3 = Library.AccentColor;
-            BorderSizePixel = 0;
-            Size = UDim2.new(1, 0, 0, 2);
-            Position = UDim2.new(0, 0, 1, -2);
-            ZIndex = 2;
-            Visible = false;
-            Parent = TabButton;
-        });
-
-        Library:AddToRegistry(TabAccentLine, {
-            BackgroundColor3 = 'AccentColor';
-        });
-
         local TabButtonLabel = Library:CreateLabel({
             Position = UDim2.new(0, 0, 0, 0);
             Size = UDim2.new(1, 0, 1, -1);
@@ -3180,7 +3166,6 @@ function Library:CreateWindow(...)
 
             Blocker.BackgroundTransparency = 0;
             TabButton.BackgroundColor3 = Library.MainColor;
-            TabAccentLine.Visible = true;
             Library.RegistryMap[TabButton].Properties.BackgroundColor3 = 'MainColor';
             TabFrame.Visible = true;
         end;
@@ -3188,7 +3173,6 @@ function Library:CreateWindow(...)
         function Tab:HideTab()
             Blocker.BackgroundTransparency = 1;
             TabButton.BackgroundColor3 = Library.BackgroundColor;
-            TabAccentLine.Visible = false;
             Library.RegistryMap[TabButton].Properties.BackgroundColor3 = 'BackgroundColor';
             TabFrame.Visible = false;
         end;
