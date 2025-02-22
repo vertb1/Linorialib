@@ -10,7 +10,7 @@ local ThemeManager = {} do
 		['Space'] = { 3, httpService:JSONDecode('{"FontColor":"ffffff","MainColor":"1c1c27","AccentColor":"ff6b6b","BackgroundColor":"15151f","OutlineColor":"32323e"}') },
 		['Sakura'] = { 4, httpService:JSONDecode('{"FontColor":"ffffff","MainColor":"1a1523","AccentColor":"ff7ac6","BackgroundColor":"130f1a","OutlineColor":"2d2437"}') },
 		['Ocean'] = { 5, httpService:JSONDecode('{"FontColor":"ffffff","MainColor":"19232d","AccentColor":"55b9ff","BackgroundColor":"0f1923","OutlineColor":"2a3a4a"}') },
-		['Matrix'] = { 6, httpService:JSONDecode('{"FontColor":"ffffff","MainColor":"0f1419","AccentColor":"00ff00","BackgroundColor":"0a0f0a","OutlineColor":"1a2b1a"}') },
+		['Neon'] = { 6, httpService:JSONDecode('{"FontColor":"ffffff","MainColor":"1a1a1a","AccentColor":"00ffb9","BackgroundColor":"141414","OutlineColor":"333333"}') },
 		['Violet'] = { 7, httpService:JSONDecode('{"FontColor":"ffffff","MainColor":"1d1628","AccentColor":"c59bf4","BackgroundColor":"14101d","OutlineColor":"332b42"}') },
 		['Arctic'] = { 8, httpService:JSONDecode('{"FontColor":"ffffff","MainColor":"1c2433","AccentColor":"6bc5ff","BackgroundColor":"131a24","OutlineColor":"2c3748"}') },
 	}
