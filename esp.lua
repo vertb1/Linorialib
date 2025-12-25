@@ -37,6 +37,7 @@ local RAD_45 = rad(45)
 local Settings = {
     enabled = true,
     showTeam = true,
+    useTeamColors = true,
     allyColor = ALLY_COLOR,
     enemyColor = ENEMY_COLOR,
     maxDistance = DEFAULT_MAX_DISTANCE,
@@ -262,7 +263,12 @@ function EntityESP:update()
         return self:hide()
     end
     
-    local color = isEnemy and Settings.enemyColor or Settings.allyColor
+    local color
+    if Settings.useTeamColors then
+        color = isEnemy and Settings.enemyColor or Settings.allyColor
+    else
+        color = Settings.enemyColor -- Use enemy color as the universal color when team colors disabled
+    end
     
     -- Proximity arrows
     if Settings.showProximityArrows and not onScreen and distance < Settings.maxProximityDistance then
