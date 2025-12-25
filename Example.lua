@@ -4,7 +4,7 @@ local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/SaveManager.lua"))()
 local AnimationVisualizer = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/AnimationVisualizer.lua"))()
 local AnimationLogger = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/AnimationLogger.lua"))()
-local ESP = loadstring(readfile("ESP_Reconstructed.lua"))()
+local ESP = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/esp.lua"))()
 
 local Window = Library:CreateWindow({
     Title = 'dxe.exe',
@@ -289,7 +289,7 @@ local ESPGroupBox = Tabs.Main:AddRightGroupbox('ESP')
 
 ESPGroupBox:AddToggle('ESPEnabled', {
     Text = 'Enable ESP',
-    Default = true,
+    Default = false,
     Tooltip = 'Toggle player ESP'
 })
 
@@ -341,13 +341,6 @@ ESPGroupBox:AddSlider('ESPTextSize', {
     Compact = false,
 })
 
-ESPGroupBox:AddDropdown('ESPFont', {
-    Text = 'Font',
-    Default = 'Code',
-    Values = {'UI', 'System', 'Code', 'Monospace'},
-    Tooltip = 'ESP text font'
-})
-
 ESPGroupBox:AddToggle('ESPTeamColors', {
     Text = 'Use Team Colors',
     Default = true,
@@ -397,11 +390,6 @@ if ESP and ESP.Settings then
     
     Options.ESPTextSize:OnChanged(function()
         ESP.Settings.textSize = Options.ESPTextSize.Value
-    end)
-    
-    Options.ESPFont:OnChanged(function()
-        local fontMap = { UI = 0, System = 1, Code = 2, Monospace = 3 }
-        ESP.Settings.font = fontMap[Options.ESPFont.Value] or 2
     end)
     
     Toggles.ESPTeamColors:OnChanged(function()
