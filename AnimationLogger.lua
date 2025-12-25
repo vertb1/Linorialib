@@ -20,9 +20,16 @@ local BLACK_OUTLINE = Color3.new(0, 0, 0)
 
 -- Animation name patterns to ignore (movement animations)
 local IGNORED_PATTERNS = {
+    -- Directional movement
+    "front", "back", "left", "right", "forward", "backward",
+    -- Generic movement
     "run", "walk", "sprint", "dash", "dodge", "roll", "jump", "fall", "land", "idle", 
     "climb", "swim", "crawl", "crouch", "slide", "vault", "mantle", "locomotion",
-    "breathing", "emote", "pose", "stance", "standing", "sitting", "laying"
+    "breathing", "emote", "pose", "stance", "standing", "sitting", "laying",
+    -- Generic numbered anims (usually movement)
+    "^animation%d", "^anim%d", "^move",
+    -- Misc
+    "equip", "unequip", "holster", "draw", "sheath", "pickup", "drop"
 }
 
 -- Important animation patterns (combat)
@@ -32,7 +39,9 @@ local IMPORTANT_PATTERNS = {
     "critical", "crit", "uppercut", "haymaker", "jab", "hook", "mantrastyle",
     "rapier", "spear", "axe", "hammer", "dagger", "greatsword", "katana", "gun",
     "bow", "staff", "wand", "gauntlet", "claw", "whip", "scythe", "halberd",
-    "m1", "m2", "ability", "skill", "spell", "mantra", "feint", "grab", "throw"
+    "m1", "m2", "ability", "skill", "spell", "mantra", "feint", "grab", "throw",
+    -- Priority-based (Action priority = combat)
+    "action"
 }
 
 -- Will be set when init is called
@@ -503,12 +512,20 @@ local function onAnimationPlayed(animator, track)
     local animName = getRealAnimationName(track, animId)
     local priority = track.Priority.Name
     
-    -- Check if it's an important animation
-    local isImportant = isImportantAnimation(animName) or priority == "Action" or priority == "Action2" or priority == "Action3" or priority == "Action4"
+    -- Check if it's an action priority (combat animations use Action priority)
+    local isActionPriority = priority == "Action" or priority == "Action2" or priority == "Action3" or priority == "Action4"
     
-    -- Combat only filter
+    -- Check if name matches important patterns
+    local isImportant = isImportantAnimation(animName) or isActionPriority
+    
+    -- Combat only filter - STRICT: only show Action priority or important named anims
     if combatOnly then
-        if isIgnoredAnimation(animName) and not isImportant then
+        -- Always skip if it matches ignored patterns (unless it's Action priority)
+        if isIgnoredAnimation(animName) and not isActionPriority then
+            return
+        end
+        -- Also skip Core priority anims (these are usually movement/idle)
+        if priority == "Core" or priority == "Idle" or priority == "Movement" then
             return
         end
     end
