@@ -3563,6 +3563,45 @@ local Toggles = {}
 		Library.Watermark.Size = UDim2.new(0, X + 15, 0, (Y * 1.5) + 3)
 	end
 
+	-- Watermark debug info update loop
+	do
+		local Stats = game:GetService("Stats")
+		local lastUpdate = 0
+		local frameCount = 0
+		local lastFpsTime = os.clock()
+		local currentFps = 60
+		
+		table.insert(Library.Signals, RunService.RenderStepped:Connect(function()
+			frameCount = frameCount + 1
+			local now = os.clock()
+			
+			-- Update FPS every 0.5 seconds
+			if now - lastFpsTime >= 0.5 then
+				currentFps = frameCount / (now - lastFpsTime)
+				frameCount = 0
+				lastFpsTime = now
+			end
+			
+			-- Update watermark every 0.1 seconds
+			if now - lastUpdate < 0.1 then return end
+			lastUpdate = now
+			
+			if Library.Watermark and Library.Watermark.Visible then
+				local ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+				local fps = currentFps
+				local cpu = Stats:GetTotalMemoryUsageMb()
+				local gpu = 0
+				
+				pcall(function()
+					gpu = Stats.Network.ServerStatsItem["Data Receive"]:GetValue() / 1000
+				end)
+				
+				local text = string.format("dxe | %.0fms | %.0f fps | %.0f MB", ping, fps, cpu)
+				Library:SetWatermark(text)
+			end
+		end))
+	end
+
 	function Library:ManuallyManagedNotify(Text)
 		if shared.dxe.silent then
 			return
