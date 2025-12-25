@@ -3210,7 +3210,7 @@ local Toggles = {}
 
 		WatermarkOuter.InputBegan:Connect(function(Input)
 			xpcall(function()
-				if not Toggles["ShowDebugInformation"].Value then
+				if not Toggles["ShowDebugInformation"] or not Toggles["ShowDebugInformation"].Value then
 					return
 				end
 
