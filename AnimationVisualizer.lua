@@ -96,12 +96,29 @@ ScreenGui.ResetOnSpawn = false
 local currentTrack = nil
 local isPaused = false
 local playbackSpeed = 1.0
+local showHitboxes = false
+local hitboxSize = 2.5
+local hitboxParts = {}
+
+-- Hitbox configuration for limbs
+local HITBOX_LIMBS = {
+    -- R6 limbs
+    "Left Arm", "Right Arm", "Left Leg", "Right Leg",
+    -- R15 limbs
+    "LeftHand", "RightHand", "LeftFoot", "RightFoot",
+    "LeftLowerArm", "RightLowerArm", "LeftLowerLeg", "RightLowerLeg",
+    "LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg",
+}
+
+local HITBOX_COLOR = Color3.fromRGB(255, 50, 50)
+local HITBOX_TRANSPARENCY = 0.6
 
 -- UI Elements (will be created in init)
 local outer, inner, viewportFrame, noViewportFrame, textLabel
 local sliderOuter, sliderFill, sliderText, sliderInner, hideBorderRight
 local playStop, frameBackwards, frameForwards, animationTextbox
 local iconTwo, speedText, worldModel, camera
+local hitboxToggle, hitboxSizeSlider, hitboxSizeLabel, hitboxSizeFill
 
 -- Connections
 local connections = {}
@@ -113,6 +130,80 @@ local function cleanConnections()
         end
     end
     connections = {}
+end
+
+-- Clean up hitbox parts
+local function cleanHitboxes()
+    for _, part in pairs(hitboxParts) do
+        if part and part.Parent then
+            part:Destroy()
+        end
+    end
+    hitboxParts = {}
+end
+
+-- Create hitbox visualization for a limb
+local function createHitboxForPart(limb)
+    local hitbox = Instance.new("Part")
+    hitbox.Name = "Hitbox_" .. limb.Name
+    hitbox.Shape = Enum.PartType.Ball
+    hitbox.Size = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
+    hitbox.Color = HITBOX_COLOR
+    hitbox.Transparency = HITBOX_TRANSPARENCY
+    hitbox.Material = Enum.Material.ForceField
+    hitbox.Anchored = false
+    hitbox.CanCollide = false
+    hitbox.CastShadow = false
+    
+    -- Weld to limb
+    local weld = Instance.new("WeldConstraint")
+    weld.Part0 = limb
+    weld.Part1 = hitbox
+    weld.Parent = hitbox
+    
+    hitbox.CFrame = limb.CFrame
+    hitbox.Parent = limb.Parent
+    
+    return hitbox
+end
+
+-- Create hitboxes for all limbs in entity
+local function createHitboxesForEntity(entity)
+    cleanHitboxes()
+    
+    if not showHitboxes or not entity then return end
+    
+    for _, limbName in ipairs(HITBOX_LIMBS) do
+        local limb = entity:FindFirstChild(limbName, true)
+        if limb and limb:IsA("BasePart") then
+            local hitbox = createHitboxForPart(limb)
+            table.insert(hitboxParts, hitbox)
+        end
+    end
+end
+
+-- Update hitbox sizes
+local function updateHitboxSizes()
+    for _, hitbox in pairs(hitboxParts) do
+        if hitbox and hitbox.Parent then
+            hitbox.Size = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
+        end
+    end
+end
+
+-- Toggle hitbox visibility
+local function toggleHitboxes()
+    showHitboxes = not showHitboxes
+    
+    if showHitboxes then
+        -- Create hitboxes for current entity
+        local entity = worldModel and worldModel:FindFirstChildWhichIsA("Model")
+        if entity then
+            createHitboxesForEntity(entity)
+        end
+    else
+        cleanHitboxes()
+    end
 end
 
 local function mapSliderValue(value, min, max, minSize, maxSize)
@@ -224,6 +315,11 @@ local function onIdFocusLost(enter, _)
     -- Show viewport
     viewportFrame.Visible = true
     noViewportFrame.Visible = false
+    
+    -- Create hitboxes if enabled
+    if showHitboxes then
+        createHitboxesForEntity(entity)
+    end
 end
 
 local function onPlaybackLoop(delta)
@@ -325,7 +421,7 @@ function AnimationVisualizer.init(lib)
     outer.BackgroundColor3 = Color3.new(1, 1, 1)
     outer.Position = UDim2.new(0.27, 0, 0.216, 0)
     outer.BorderColor3 = Color3.new()
-    outer.Size = UDim2.new(0, 260, 0, 301)
+    outer.Size = UDim2.new(0, 260, 0, 323)
     outer.ZIndex = 100
     outer.Parent = ScreenGui
 
@@ -517,6 +613,87 @@ function AnimationVisualizer.init(lib)
     sliderText.Size = UDim2.new(1, 0, 1, 0)
     sliderText.Parent = sliderOuter
 
+    -- Hitbox toggle button
+    hitboxToggle = Instance.new("TextButton")
+    hitboxToggle.Name = "HitboxToggle"
+    hitboxToggle.FontFace = Font.new("rbxasset://fonts/families/RobotoMono.json")
+    hitboxToggle.TextColor3 = Library.FontColor
+    hitboxToggle.Text = "Hitboxes"
+    hitboxToggle.BackgroundColor3 = Library.MainColor
+    hitboxToggle.BorderColor3 = Color3.new()
+    hitboxToggle.Position = UDim2.new(0, 6, 0, 299)
+    hitboxToggle.Size = UDim2.new(0, 70, 0, 18)
+    hitboxToggle.TextSize = 11
+    hitboxToggle.Parent = inner
+
+    -- Hitbox size label
+    hitboxSizeLabel = Instance.new("TextLabel")
+    hitboxSizeLabel.Name = "HitboxSizeLabel"
+    hitboxSizeLabel.FontFace = Font.new("rbxasset://fonts/families/RobotoMono.json")
+    hitboxSizeLabel.TextColor3 = Library.FontColor
+    hitboxSizeLabel.Text = "Size: 2.5"
+    hitboxSizeLabel.BackgroundTransparency = 1
+    hitboxSizeLabel.Position = UDim2.new(0, 80, 0, 299)
+    hitboxSizeLabel.TextXAlignment = Enum.TextXAlignment.Left
+    hitboxSizeLabel.TextSize = 11
+    hitboxSizeLabel.Size = UDim2.new(0, 50, 0, 18)
+    hitboxSizeLabel.Parent = inner
+
+    -- Hitbox size slider
+    local hitboxSliderOuter = Instance.new("Frame")
+    hitboxSliderOuter.Name = "HitboxSliderOuter"
+    hitboxSliderOuter.BackgroundColor3 = Color3.new(1, 1, 1)
+    hitboxSliderOuter.Position = UDim2.new(0, 134, 0, 299)
+    hitboxSliderOuter.BorderColor3 = Color3.new()
+    hitboxSliderOuter.BorderSizePixel = 0
+    hitboxSliderOuter.Size = UDim2.new(0, 118, 0, 18)
+    hitboxSliderOuter.Parent = inner
+
+    local hitboxSliderInner = Instance.new("Frame")
+    hitboxSliderInner.Name = "SliderInner"
+    hitboxSliderInner.BorderColor3 = Color3.new()
+    hitboxSliderInner.BackgroundColor3 = Library.MainColor
+    hitboxSliderInner.Size = UDim2.new(1, 0, 1, 0)
+    hitboxSliderInner.Parent = hitboxSliderOuter
+
+    hitboxSizeFill = Instance.new("Frame")
+    hitboxSizeFill.Name = "SliderFill"
+    hitboxSizeFill.BorderMode = Enum.BorderMode.Inset
+    hitboxSizeFill.BorderColor3 = Library.AccentColorDark
+    hitboxSizeFill.BackgroundColor3 = Library.AccentColor
+    hitboxSizeFill.Size = UDim2.new((2.5 - 0.5) / (10 - 0.5), 0, 1, 0)
+    hitboxSizeFill.ZIndex = 10
+    hitboxSizeFill.Parent = hitboxSliderOuter
+
+    -- Hitbox slider interaction
+    local draggingHitboxSlider = false
+    hitboxSliderOuter.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            draggingHitboxSlider = true
+        end
+    end)
+
+    hitboxSliderOuter.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            draggingHitboxSlider = false
+        end
+    end)
+
+    table.insert(connections, RunService.RenderStepped:Connect(function()
+        if draggingHitboxSlider and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+            local mouse = Players.LocalPlayer:GetMouse()
+            local sliderSize = hitboxSliderOuter.AbsoluteSize.X
+            local mouseX = math.clamp(mouse.X - hitboxSliderOuter.AbsolutePosition.X, 0, sliderSize)
+            local percentage = mouseX / sliderSize
+            local value = 0.5 + (percentage * (10 - 0.5))
+            value = math.floor(value * 10) / 10 -- Round to 1 decimal
+            hitboxSize = value
+            hitboxSizeFill.Size = UDim2.new(percentage, 0, 1, 0)
+            hitboxSizeLabel.Text = string.format("Size: %.1f", value)
+            updateHitboxSizes()
+        end
+    end))
+
     -- Make draggable
     Library:MakeDraggable(outer)
 
@@ -539,8 +716,16 @@ function AnimationVisualizer.init(lib)
     Library:AddToRegistry(hideBorderRight, { BackgroundColor3 = "AccentColor" }, true)
     Library:AddToRegistry(sliderText, { TextColor3 = "FontColor" }, true)
     Library:AddToRegistry(speedText, { TextColor3 = "FontColor" }, true)
+    Library:AddToRegistry(hitboxToggle, { BackgroundColor3 = "MainColor" }, true)
+    Library:AddToRegistry(hitboxSizeLabel, { TextColor3 = "FontColor" }, true)
+    Library:AddToRegistry(hitboxSliderInner, { BackgroundColor3 = "MainColor" }, true)
+    Library:AddToRegistry(hitboxSizeFill, { BackgroundColor3 = "AccentColor", BorderColor3 = "AccentColorDark" }, true)
 
     -- Connect events
+    table.insert(connections, hitboxToggle.MouseButton1Click:Connect(function()
+        toggleHitboxes()
+        hitboxToggle.TextColor3 = showHitboxes and Library.AccentColor or Library.FontColor
+    end))
     table.insert(connections, animationTextbox.FocusLost:Connect(onIdFocusLost))
     table.insert(connections, RunService.RenderStepped:Connect(onPlaybackLoop))
     table.insert(connections, playStop.MouseButton1Click:Connect(togglePlayStop))
@@ -558,6 +743,7 @@ end
 
 function AnimationVisualizer.detach()
     cleanConnections()
+    cleanHitboxes()
     if ScreenGui then
         ScreenGui:Destroy()
     end
