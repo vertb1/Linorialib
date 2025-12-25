@@ -47,6 +47,7 @@ local Settings = {
     showProximityArrows = false,
     maxProximityDistance = DEFAULT_PROXIMITY_DISTANCE,
     textSize = DEFAULT_TEXT_SIZE,
+    font = DEFAULT_FONT,
     arrowSize = DEFAULT_ARROW_SIZE,
     debugMode = false
 }
@@ -312,6 +313,8 @@ function EntityESP:update()
     self.label.Position = Vector2.new(screenPos.X, screenPos.Y - self.label.TextBounds.Y)
     self.label.Text = labelText
     self.label.Color = color
+    self.label.Size = Settings.textSize
+    self.label.Font = Settings.font
     
     -- Update box
     if Settings.showBoxes then
