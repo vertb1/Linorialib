@@ -1,5 +1,5 @@
 -- Animation Logger Module (Standalone)
--- Logs animation IDs, names, priorities, and speeds from entities in the game.
+-- Logs combat animation IDs with parry timing suggestions and hitbox visualization
 local AnimationLogger = {}
 
 -- Services
@@ -7,47 +7,24 @@ local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Debris = game:GetService("Debris")
 
 -- Constants
 local MAX_LOG_ENTRIES = 100
 local FONT_FACE = Font.new("rbxasset://fonts/families/RobotoMono.json")
 local ROW_HEIGHT = 18
 local HEADER_HEIGHT = 26
-local WINDOW_WIDTH = 520
-local WINDOW_HEIGHT = 450
+local WINDOW_WIDTH = 600
+local WINDOW_HEIGHT = 480
 local BLACK_OUTLINE = Color3.new(0, 0, 0)
-
--- Animation name patterns to ignore (movement animations)
-local IGNORED_PATTERNS = {
-    -- Directional movement
-    "front", "back", "left", "right", "forward", "backward",
-    -- Generic movement
-    "run", "walk", "sprint", "dash", "dodge", "roll", "jump", "fall", "land", "idle", 
-    "climb", "swim", "crawl", "crouch", "slide", "vault", "mantle", "locomotion",
-    "breathing", "emote", "pose", "stance", "standing", "sitting", "laying",
-    -- Generic numbered anims (usually movement)
-    "^animation%d", "^anim%d", "^move",
-    -- Misc
-    "equip", "unequip", "holster", "draw", "sheath", "pickup", "drop"
-}
-
--- Important animation patterns (combat)
-local IMPORTANT_PATTERNS = {
-    "sword", "fist", "punch", "kick", "slash", "cut", "swing", "stab", "thrust",
-    "heavy", "light", "combo", "attack", "hit", "strike", "parry", "block", "guard",
-    "critical", "crit", "uppercut", "haymaker", "jab", "hook", "mantrastyle",
-    "rapier", "spear", "axe", "hammer", "dagger", "greatsword", "katana", "gun",
-    "bow", "staff", "wand", "gauntlet", "claw", "whip", "scythe", "halberd",
-    "m1", "m2", "ability", "skill", "spell", "mantra", "feint", "grab", "throw",
-    -- Priority-based (Action priority = combat)
-    "action"
-}
+local MAX_HITBOX_TIME = 3.0
+local DEFAULT_HITBOX_SIZE = Vector3.new(6, 6, 8)
 
 -- Will be set when init is called
 local Library = nil
 local AnimationVisualizer = nil
 
--- Track playback data
+-- Track playback data with animation speed history (Lycoris-style)
 local PlaybackData = {}
 PlaybackData.__index = PlaybackData
 
@@ -55,30 +32,62 @@ function PlaybackData.new(track, entity)
     local self = setmetatable({}, PlaybackData)
     self.track = track
     self.entity = entity
-    self.startTime = os.clock()
-    self.speeds = {}
-    self.timePositions = {}
-    self.lastUpdate = os.clock()
+    self.base = os.clock() -- Timestamp of creation
+    self.ash = {} -- Animation Speed History: { [timeDelta] = speed }
+    self.lastSpeed = nil
     return self
 end
 
-function PlaybackData:update()
-    if not self.track or not self.track.IsPlaying then return end
-    local now = os.clock()
-    table.insert(self.speeds, self.track.Speed)
-    table.insert(self.timePositions, self.track.TimePosition)
-    self.lastUpdate = now
+-- Track animation speed at current time delta
+function PlaybackData:astrack(speed)
+    local delta = os.clock() - self.base
+    -- Only record if speed changed
+    if self.lastSpeed == speed then return end
+    self.ash[delta] = speed
+    self.lastSpeed = speed
+end
+
+-- Get the last recorded speed before a given time delta
+function PlaybackData:last(fromDelta)
+    local latestSpeed = nil
+    local latestDelta = nil
+    for delta, speed in pairs(self.ash) do
+        if fromDelta <= delta then continue end
+        if latestDelta and delta <= latestDelta then continue end
+        latestSpeed = speed
+        latestDelta = delta
+    end
+    return latestSpeed, latestDelta
 end
 
 function PlaybackData:getAvgSpeed()
-    if #self.speeds == 0 then return 1 end
     local sum = 0
-    for _, s in ipairs(self.speeds) do sum = sum + s end
-    return sum / #self.speeds
+    local count = 0
+    for _, speed in pairs(self.ash) do
+        sum = sum + speed
+        count = count + 1
+    end
+    return count > 0 and (sum / count) or 1
 end
 
 function PlaybackData:getDuration()
-    return os.clock() - self.startTime
+    return os.clock() - self.base
+end
+
+-- Calculate real-world time to reach a position, accounting for speed changes
+function PlaybackData:calculateTimeToPosition(targetPos)
+    local currentPos = 0
+    local elapsed = 0
+    local dt = 0.01
+    local maxIter = 10000
+    local iter = 0
+    while currentPos < targetPos and iter < maxIter do
+        local speed = self:last(elapsed) or 1
+        currentPos = currentPos + (speed * dt)
+        elapsed = elapsed + dt
+        iter = iter + 1
+    end
+    return elapsed
 end
 
 -- UI Elements
@@ -97,6 +106,7 @@ local filterText = ""
 local showNpcsOnly = false
 local showPlayersOnly = false
 local autoCopy = false
+local showHitboxes = false
 local maxDistance = 100
 local distanceSliderFill = nil
 local distanceLabel = nil
@@ -105,10 +115,13 @@ local distanceLabel = nil
 local activePlaybacks = {} -- track -> PlaybackData
 local recordedPlaybacks = {} -- animId -> PlaybackData (completed)
 
+-- Hitbox visualization
+local activeHitboxes = {} -- track -> Part
+
 -- UI References
 local outer, inner, scrollFrame, listLayout
 local filterTextbox, clearButton, toggleLoggingButton
-local npcFilterButton, playerFilterButton, autoCopyButton
+local npcFilterButton, playerFilterButton, autoCopyButton, hitboxToggleButton
 local entryCountLabel
 
 -- Animation name cache (try to find real names)
@@ -173,29 +186,6 @@ local function getRealAnimationName(track, animId)
     return name
 end
 
--- Check if animation name matches ignored patterns
-local function isIgnoredAnimation(animName)
-    local lowerName = animName:lower()
-    for _, pattern in ipairs(IGNORED_PATTERNS) do
-        if lowerName:find(pattern) then
-            return true
-        end
-    end
-    return false
-end
-
--- Check if animation name matches important/combat patterns
-local function isImportantAnimation(animName)
-    local lowerName = animName:lower()
-    for _, pattern in ipairs(IMPORTANT_PATTERNS) do
-        if lowerName:find(pattern) then
-            return true
-        end
-    end
-    -- Also check priority - Action and above are usually important
-    return false
-end
-
 -- Get distance from local player to entity
 local function getDistanceToEntity(entity)
     local localPlayer = Players.LocalPlayer
@@ -221,6 +211,43 @@ local function copyToClipboard(text)
         return true
     end
     return false
+end
+
+-- Hitbox visualization functions
+local function createHitboxVisualization(entity, color)
+    if not showHitboxes then return nil end
+    local root = entity:FindFirstChild("HumanoidRootPart")
+    if not root then return nil end
+    
+    local hitbox = Instance.new("Part")
+    hitbox.Name = "AnimLoggerHitbox"
+    hitbox.Anchored = true
+    hitbox.CanCollide = false
+    hitbox.CanQuery = false
+    hitbox.CanTouch = false
+    hitbox.Material = Enum.Material.ForceField
+    hitbox.CastShadow = false
+    hitbox.Size = DEFAULT_HITBOX_SIZE
+    hitbox.Transparency = 0.6
+    hitbox.Color = color or Color3.fromRGB(255, 50, 50)
+    hitbox.Shape = Enum.PartType.Block
+    hitbox.CFrame = root.CFrame * CFrame.new(0, 0, -(DEFAULT_HITBOX_SIZE.Z / 2))
+    hitbox.Parent = workspace
+    Debris:AddItem(hitbox, MAX_HITBOX_TIME)
+    return hitbox
+end
+
+local function updateHitboxPosition(hitbox, entity)
+    if not hitbox or not hitbox.Parent then return end
+    local root = entity:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    hitbox.CFrame = root.CFrame * CFrame.new(0, 0, -(DEFAULT_HITBOX_SIZE.Z / 2))
+end
+
+local function cleanupHitbox(track)
+    local hitbox = activeHitboxes[track]
+    if hitbox and hitbox.Parent then hitbox:Destroy() end
+    activeHitboxes[track] = nil
 end
 
 -- Create a log entry row
@@ -313,11 +340,25 @@ local function createLogEntryRow(data)
     lengthLabel.Text = string.format("%.2f", data.length or 0)
     lengthLabel.BackgroundTransparency = 1
     lengthLabel.Position = UDim2.new(0, 335, 0, 0)
-    lengthLabel.Size = UDim2.new(0, 35, 1, 0)
+    lengthLabel.Size = UDim2.new(0, 32, 1, 0)
     lengthLabel.TextSize = 11
     lengthLabel.TextXAlignment = Enum.TextXAlignment.Left
     lengthLabel.ClipsDescendants = true
     lengthLabel.Parent = row
+
+    -- Parry Time (suggested timing in ms) - YELLOW for visibility
+    local parryLabel = Instance.new("TextLabel")
+    parryLabel.Name = "ParryTime"
+    parryLabel.FontFace = FONT_FACE
+    parryLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+    parryLabel.Text = data.suggestedParryMs and string.format("%dms", data.suggestedParryMs) or "---"
+    parryLabel.BackgroundTransparency = 1
+    parryLabel.Position = UDim2.new(0, 370, 0, 0)
+    parryLabel.Size = UDim2.new(0, 42, 1, 0)
+    parryLabel.TextSize = 11
+    parryLabel.TextXAlignment = Enum.TextXAlignment.Left
+    parryLabel.ClipsDescendants = true
+    parryLabel.Parent = row
 
     -- Priority
     local priorityLabel = Instance.new("TextLabel")
@@ -326,13 +367,26 @@ local function createLogEntryRow(data)
     priorityLabel.TextColor3 = Library.FontColor
     priorityLabel.Text = data.priority:sub(1, 4)
     priorityLabel.BackgroundTransparency = 1
-    priorityLabel.Position = UDim2.new(0, 374, 0, 0)
-    priorityLabel.Size = UDim2.new(0, 35, 1, 0)
+    priorityLabel.Position = UDim2.new(0, 414, 0, 0)
+    priorityLabel.Size = UDim2.new(0, 32, 1, 0)
     priorityLabel.TextSize = 11
     priorityLabel.TextXAlignment = Enum.TextXAlignment.Left
     priorityLabel.TextTruncate = Enum.TextTruncate.AtEnd
     priorityLabel.ClipsDescendants = true
     priorityLabel.Parent = row
+
+    -- Export button (exports timing data)
+    local exportBtn = Instance.new("TextButton")
+    exportBtn.Name = "ExportBtn"
+    exportBtn.FontFace = FONT_FACE
+    exportBtn.TextColor3 = Library.FontColor
+    exportBtn.Text = "Exp"
+    exportBtn.BackgroundColor3 = Library.MainColor
+    exportBtn.BorderColor3 = BLACK_OUTLINE
+    exportBtn.Position = UDim2.new(1, -88, 0, 2)
+    exportBtn.Size = UDim2.new(0, 28, 0, ROW_HEIGHT - 4)
+    exportBtn.TextSize = 9
+    exportBtn.Parent = row
 
     -- Copy button
     local copyBtn = Instance.new("TextButton")
@@ -342,7 +396,7 @@ local function createLogEntryRow(data)
     copyBtn.Text = "Copy"
     copyBtn.BackgroundColor3 = Library.MainColor
     copyBtn.BorderColor3 = BLACK_OUTLINE
-    copyBtn.Position = UDim2.new(1, -42, 0, 2)
+    copyBtn.Position = UDim2.new(1, -58, 0, 2)
     copyBtn.Size = UDim2.new(0, 38, 0, ROW_HEIGHT - 4)
     copyBtn.TextSize = 10
     copyBtn.Parent = row
@@ -355,8 +409,8 @@ local function createLogEntryRow(data)
     previewBtn.Text = "▶"
     previewBtn.BackgroundColor3 = Library.MainColor
     previewBtn.BorderColor3 = BLACK_OUTLINE
-    previewBtn.Position = UDim2.new(1, -62, 0, 2)
-    previewBtn.Size = UDim2.new(0, 18, 0, ROW_HEIGHT - 4)
+    previewBtn.Position = UDim2.new(1, -18, 0, 2)
+    previewBtn.Size = UDim2.new(0, 14, 0, ROW_HEIGHT - 4)
     previewBtn.TextSize = 10
     previewBtn.Parent = row
 
@@ -368,6 +422,7 @@ local function createLogEntryRow(data)
     Library:AddToRegistry(lengthLabel, { TextColor3 = "FontColor" }, true)
     Library:AddToRegistry(priorityLabel, { TextColor3 = "FontColor" }, true)
     Library:AddToRegistry(copyBtn, { BackgroundColor3 = "MainColor", TextColor3 = "FontColor" }, true)
+    Library:AddToRegistry(exportBtn, { BackgroundColor3 = "MainColor", TextColor3 = "FontColor" }, true)
     Library:AddToRegistry(previewBtn, { BackgroundColor3 = "MainColor", TextColor3 = "FontColor" }, true)
 
     -- Copy button click
@@ -378,6 +433,27 @@ local function createLogEntryRow(data)
             task.delay(1, function()
                 if copyBtn and copyBtn.Parent then
                     copyBtn.Text = "Copy"
+                end
+            end)
+        end
+    end)
+
+    -- Export button click (exports timing data)
+    exportBtn.MouseButton1Click:Connect(function()
+        local exportStr = string.format(
+            '{\n  animId = "rbxassetid://%s",\n  name = "%s",\n  length = %.3f,\n  speed = %.2f,\n  suggestedParryMs = %d,\n  priority = "%s"\n}',
+            data.animId,
+            data.animName or "Unknown",
+            data.length or 0,
+            data.speed or 1,
+            data.suggestedParryMs or 0,
+            data.priority or "Unknown"
+        )
+        if copyToClipboard(exportStr) then
+            exportBtn.Text = "✓"
+            task.delay(1, function()
+                if exportBtn and exportBtn.Parent then
+                    exportBtn.Text = "Exp"
                 end
             end)
         end
@@ -443,7 +519,7 @@ local function updateLogDisplay()
 end
 
 -- Add a new log entry
-local function addLogEntry(entityName, animId, animName, priority, isPlayer, distance, isImportant, speed, length)
+local function addLogEntry(entityName, animId, animName, priority, isPlayer, distance, isImportant, speed, length, suggestedParryMs)
     local formattedId = formatAnimationId(animId)
 
     local entry = {
@@ -457,6 +533,7 @@ local function addLogEntry(entityName, animId, animName, priority, isPlayer, dis
         isImportant = isImportant,
         speed = speed or 1,
         length = length or 0,
+        suggestedParryMs = suggestedParryMs,
         timestamp = os.clock()
     }
 
@@ -509,28 +586,37 @@ local function onAnimationPlayed(animator, track)
     local animName = getRealAnimationName(track, animId)
     local priority = track.Priority.Name
     
-    -- Check if it's an action priority (combat animations use Action priority)
+    -- =========================================================================
+    -- STRICT FILTERING: Only Action priority (combat) animations
+    -- =========================================================================
     local isActionPriority = priority == "Action" or priority == "Action2" or priority == "Action3" or priority == "Action4"
     
-    -- ALWAYS filter movement animations - only log combat/action animations
-    -- Skip Core/Idle/Movement priority (these are movement/idle anims)
-    if priority == "Core" or priority == "Idle" or priority == "Movement" then
+    -- Skip anything that isn't Action priority
+    if not isActionPriority then
         return
     end
     
-    -- Skip if name matches ignored patterns (unless it's Action priority)
-    if isIgnoredAnimation(animName) and not isActionPriority then
+    -- Skip low weight (blend/transition)
+    if track.WeightTarget <= 0.05 then
         return
     end
     
-    -- Check if name matches important patterns
-    local isImportant = isImportantAnimation(animName) or isActionPriority
+    local isImportant = true -- All Action priority are important
 
-    -- Start tracking playback data
+    -- Start tracking playback data (Lycoris-style ash)
     local pbdata = PlaybackData.new(track, entity)
     activePlaybacks[track] = pbdata
     
-    -- Track when animation ends to record final data
+    -- Record initial speed
+    pbdata:astrack(track.Speed)
+    
+    -- Create hitbox visualization if enabled
+    local hitbox = createHitboxVisualization(entity, Color3.fromRGB(255, 50, 50))
+    if hitbox then
+        activeHitboxes[track] = hitbox
+    end
+    
+    -- Track when animation ends
     local conn
     conn = track.Stopped:Connect(function()
         if conn then conn:Disconnect() end
@@ -539,13 +625,20 @@ local function onAnimationPlayed(animator, track)
         local formattedId = formatAnimationId(animId)
         recordedPlaybacks[formattedId] = pbdata
         activePlaybacks[track] = nil
+        
+        -- Cleanup hitbox
+        cleanupHitbox(track)
     end)
     
-    -- Get initial speed and length
+    -- Get speed and length
     local speed = track.Speed
     local length = track.Length
+    
+    -- Calculate suggested parry timing
+    -- Most attacks hit around 40-60% of animation, suggest 50% adjusted for speed
+    local suggestedParryMs = math.floor((length * 0.5 / speed) * 1000)
 
-    addLogEntry(entityName, animId, animName, priority, isPlayer, distance, isImportant, speed, length)
+    addLogEntry(entityName, animId, animName, priority, isPlayer, distance, isImportant, speed, length, suggestedParryMs)
 end
 
 -- Track an animator
@@ -602,7 +695,7 @@ local function startLogging()
         table.insert(connections, liveConn)
     end
     
-    -- Update loop for playback tracking
+    -- Update loop for playback tracking and hitbox positions
     local updateConn = RunService.RenderStepped:Connect(function()
         for track, pbdata in pairs(activePlaybacks) do
             if not track.IsPlaying then
@@ -610,9 +703,29 @@ local function startLogging()
                 local formattedId = formatAnimationId(track.Animation.AnimationId)
                 recordedPlaybacks[formattedId] = pbdata
                 activePlaybacks[track] = nil
+                cleanupHitbox(track)
             else
-                -- Update playback data
-                pbdata:update()
+                -- Track speed changes (Lycoris-style ash)
+                pbdata:astrack(track.Speed)
+                
+                -- Update hitbox position and color based on progress
+                local hitbox = activeHitboxes[track]
+                if hitbox and hitbox.Parent and pbdata.entity then
+                    updateHitboxPosition(hitbox, pbdata.entity)
+                    
+                    -- Color based on animation progress (parry window detection)
+                    local progress = track.TimePosition / track.Length
+                    if progress >= 0.35 and progress <= 0.65 then
+                        -- Danger zone (likely parry window) - Yellow
+                        hitbox.Color = Color3.fromRGB(255, 255, 0)
+                    elseif progress > 0.65 then
+                        -- Past danger zone - Green
+                        hitbox.Color = Color3.fromRGB(100, 255, 100)
+                    else
+                        -- Before danger zone - Red
+                        hitbox.Color = Color3.fromRGB(255, 50, 50)
+                    end
+                end
             end
         end
     end)
@@ -624,6 +737,11 @@ local function stopLogging()
     isLogging = false
     toggleLoggingButton.Text = "Start Logging"
     toggleLoggingButton.TextColor3 = Library.FontColor
+
+    -- Cleanup hitboxes
+    for track, _ in pairs(activeHitboxes) do
+        cleanupHitbox(track)
+    end
 
     -- Disconnect animator connections but keep UI connections
     for animator, conn in pairs(trackedAnimators) do
@@ -677,6 +795,19 @@ local function toggleAutoCopy()
     autoCopyButton.TextColor3 = autoCopy and Library.AccentColor or Library.FontColor
 end
 
+-- Toggle hitbox visualization
+local function toggleHitboxes()
+    showHitboxes = not showHitboxes
+    hitboxToggleButton.TextColor3 = showHitboxes and Library.AccentColor or Library.FontColor
+    
+    -- If disabled, cleanup existing hitboxes
+    if not showHitboxes then
+        for track, _ in pairs(activeHitboxes) do
+            cleanupHitbox(track)
+        end
+    end
+end
+
 -- Update distance slider
 local function updateDistanceSlider(value)
     maxDistance = value
@@ -725,12 +856,12 @@ function AnimationLogger.init(lib, animVis)
     titleLabel.Name = "Title"
     titleLabel.FontFace = FONT_FACE
     titleLabel.TextColor3 = Library.AccentColor
-    titleLabel.Text = "Animation Logger"
+    titleLabel.Text = "Animation Logger (Combat)"
     titleLabel.BackgroundTransparency = 1
     titleLabel.Position = UDim2.new(0, 5, 0, 5)
     titleLabel.TextXAlignment = Enum.TextXAlignment.Left
     titleLabel.TextSize = 17
-    titleLabel.Size = UDim2.new(0, 150, 0, 20)
+    titleLabel.Size = UDim2.new(0, 200, 0, 20)
     titleLabel.Parent = inner
 
     -- Entry count
@@ -770,8 +901,9 @@ function AnimationLogger.init(lib, animVis)
         { name = "Name", pos = 158, width = 100 },
         { name = "Dist", pos = 262, width = 30 },
         { name = "Spd", pos = 296, width = 35 },
-        { name = "Len", pos = 335, width = 35 },
-        { name = "Prio", pos = 374, width = 35 },
+        { name = "Len", pos = 335, width = 32 },
+        { name = "Parry", pos = 370, width = 42 },
+        { name = "Prio", pos = 414, width = 32 },
     }
 
     for _, header in ipairs(headers) do
@@ -893,6 +1025,18 @@ function AnimationLogger.init(lib, animVis)
     autoCopyButton.TextSize = 12
     autoCopyButton.Parent = controlBar
 
+    hitboxToggleButton = Instance.new("TextButton")
+    hitboxToggleButton.Name = "HitboxToggle"
+    hitboxToggleButton.FontFace = FONT_FACE
+    hitboxToggleButton.TextColor3 = Library.FontColor
+    hitboxToggleButton.Text = "Hitboxes"
+    hitboxToggleButton.BackgroundColor3 = Library.MainColor
+    hitboxToggleButton.BorderColor3 = BLACK_OUTLINE
+    hitboxToggleButton.Position = UDim2.new(0, 187, 0, 26)
+    hitboxToggleButton.Size = UDim2.new(0, 60, 0, 20)
+    hitboxToggleButton.TextSize = 12
+    hitboxToggleButton.Parent = controlBar
+
     -- Row 3: Distance slider
     distanceLabel = Instance.new("TextLabel")
     distanceLabel.Name = "DistanceLabel"
@@ -972,6 +1116,7 @@ function AnimationLogger.init(lib, animVis)
     Library:AddToRegistry(npcFilterButton, { BackgroundColor3 = "MainColor" }, true)
     Library:AddToRegistry(playerFilterButton, { BackgroundColor3 = "MainColor" }, true)
     Library:AddToRegistry(autoCopyButton, { BackgroundColor3 = "MainColor" }, true)
+    Library:AddToRegistry(hitboxToggleButton, { BackgroundColor3 = "MainColor" }, true)
     Library:AddToRegistry(distanceLabel, { TextColor3 = "FontColor" }, true)
     Library:AddToRegistry(distanceSliderInner, { BackgroundColor3 = "MainColor" }, true)
     Library:AddToRegistry(distanceSliderFill, { BackgroundColor3 = "AccentColor", BorderColor3 = "AccentColorDark" }, true)
@@ -987,6 +1132,7 @@ function AnimationLogger.init(lib, animVis)
     npcFilterButton.MouseButton1Click:Connect(toggleNpcFilter)
     playerFilterButton.MouseButton1Click:Connect(togglePlayerFilter)
     autoCopyButton.MouseButton1Click:Connect(toggleAutoCopy)
+    hitboxToggleButton.MouseButton1Click:Connect(toggleHitboxes)
 
     -- Store reference in Library
     Library.AnimationLoggerFrame = outer
@@ -998,6 +1144,12 @@ function AnimationLogger.detach()
     cleanConnections()
     activePlaybacks = {}
     recordedPlaybacks = {}
+    
+    -- Cleanup all hitboxes
+    for track, _ in pairs(activeHitboxes) do
+        cleanupHitbox(track)
+    end
+    
     if ScreenGui then
         ScreenGui:Destroy()
     end
@@ -1035,6 +1187,9 @@ function AnimationLogger.exportTimingData(animId)
     
     if not entry then return nil end
     
+    local avgSpeed = pbdata and pbdata:getAvgSpeed() or entry.speed
+    local suggestedParryMs = entry.suggestedParryMs or math.floor((entry.length * 0.5 / avgSpeed) * 1000)
+    
     return {
         -- Animation info
         animId = "rbxassetid://" .. formattedId,
@@ -1044,16 +1199,17 @@ function AnimationLogger.exportTimingData(animId)
         -- Timing info for defender configs
         length = entry.length,
         speed = entry.speed,
-        avgSpeed = pbdata and pbdata:getAvgSpeed() or entry.speed,
+        avgSpeed = avgSpeed,
         duration = pbdata and pbdata:getDuration() or entry.length,
+        suggestedParryMs = suggestedParryMs,
+        
+        -- Speed history (if available)
+        speedHistory = pbdata and pbdata.ash or {},
         
         -- Entity info
         entityName = entry.entityName,
         isPlayer = entry.isPlayer,
         isImportant = entry.isImportant,
-        
-        -- Suggested timing (can be used as a starting point)
-        suggestedParryTime = entry.length * 0.5 * 1000, -- mid-point in ms
     }
 end
 
