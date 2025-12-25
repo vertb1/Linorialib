@@ -35,6 +35,7 @@ local RAD_45 = rad(45)
 
 -- Settings table (PascalCase for table)
 local Settings = {
+    enabled = true,
     showTeam = true,
     allyColor = ALLY_COLOR,
     enemyColor = ENEMY_COLOR,
@@ -186,18 +187,18 @@ end
 function EntityESP:hide(keepTriangle)
     debugLog("Hiding ESP for player:", self.playerName)
     
-    if not keepTriangle then
+    if not keepTriangle and self.triangle then
         self.triangle.Visible = false
     end
     
     if not self.visible then return end
     
     self.visible = false
-    self.label.Visible = false
-    self.box.Visible = false
-    self.line.Visible = false
-    self.healthBar.Visible = false
-    self.healthBarValue.Visible = false
+    if self.label then self.label.Visible = false end
+    if self.box then self.box.Visible = false end
+    if self.line then self.line.Visible = false end
+    if self.healthBar then self.healthBar.Visible = false end
+    if self.healthBarValue then self.healthBarValue.Visible = false end
 end
 
 function EntityESP:destroy()
@@ -216,6 +217,11 @@ function EntityESP:destroy()
 end
 
 function EntityESP:update()
+    -- Check if ESP is enabled globally
+    if not Settings.enabled then
+        return self:hide()
+    end
+    
     local camera = workspace.CurrentCamera
     if not camera then
         return self:hide()
