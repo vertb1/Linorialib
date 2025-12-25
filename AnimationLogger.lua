@@ -1,5 +1,6 @@
 -- Animation Logger Module (Standalone)
 -- Logs animation IDs, names, priorities, and speeds from entities in the game.
+-- Based on Lycoris-Rewrite animation handling patterns
 local AnimationLogger = {}
 
 -- Services
@@ -13,8 +14,8 @@ local MAX_LOG_ENTRIES = 100
 local FONT_FACE = Font.new("rbxasset://fonts/families/RobotoMono.json")
 local ROW_HEIGHT = 18
 local HEADER_HEIGHT = 26
-local WINDOW_WIDTH = 460
-local WINDOW_HEIGHT = 420
+local WINDOW_WIDTH = 520
+local WINDOW_HEIGHT = 450
 local BLACK_OUTLINE = Color3.new(0, 0, 0)
 
 -- Animation name patterns to ignore (movement animations)
@@ -38,6 +39,40 @@ local IMPORTANT_PATTERNS = {
 local Library = nil
 local AnimationVisualizer = nil
 
+-- Track playback data (like Lycoris PlaybackData)
+local PlaybackData = {}
+PlaybackData.__index = PlaybackData
+
+function PlaybackData.new(track, entity)
+    local self = setmetatable({}, PlaybackData)
+    self.track = track
+    self.entity = entity
+    self.startTime = os.clock()
+    self.speeds = {}
+    self.timePositions = {}
+    self.lastUpdate = os.clock()
+    return self
+end
+
+function PlaybackData:update()
+    if not self.track or not self.track.IsPlaying then return end
+    local now = os.clock()
+    table.insert(self.speeds, self.track.Speed)
+    table.insert(self.timePositions, self.track.TimePosition)
+    self.lastUpdate = now
+end
+
+function PlaybackData:getAvgSpeed()
+    if #self.speeds == 0 then return 1 end
+    local sum = 0
+    for _, s in ipairs(self.speeds) do sum = sum + s end
+    return sum / #self.speeds
+end
+
+function PlaybackData:getDuration()
+    return os.clock() - self.startTime
+end
+
 -- UI Elements
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "AnimationLogger"
@@ -59,6 +94,10 @@ local maxDistance = 100
 local distanceSliderFill = nil
 local distanceLabel = nil
 local combatOnlyButton = nil
+
+-- Playback tracking (like Lycoris)
+local activePlaybacks = {} -- track -> PlaybackData
+local recordedPlaybacks = {} -- animId -> PlaybackData (completed)
 
 -- UI References
 local outer, inner, scrollFrame, listLayout
@@ -195,7 +234,7 @@ local function createLogEntryRow(data)
     entityLabel.Text = data.entityName
     entityLabel.BackgroundTransparency = 1
     entityLabel.Position = UDim2.new(0, 4, 0, 0)
-    entityLabel.Size = UDim2.new(0, 70, 1, 0)
+    entityLabel.Size = UDim2.new(0, 60, 1, 0)
     entityLabel.TextSize = 11
     entityLabel.TextXAlignment = Enum.TextXAlignment.Left
     entityLabel.TextTruncate = Enum.TextTruncate.AtEnd
@@ -209,8 +248,8 @@ local function createLogEntryRow(data)
     idLabel.TextColor3 = Library.AccentColor
     idLabel.Text = data.animId
     idLabel.BackgroundTransparency = 1
-    idLabel.Position = UDim2.new(0, 74, 0, 0)
-    idLabel.Size = UDim2.new(0, 95, 1, 0)
+    idLabel.Position = UDim2.new(0, 64, 0, 0)
+    idLabel.Size = UDim2.new(0, 90, 1, 0)
     idLabel.TextSize = 11
     idLabel.TextXAlignment = Enum.TextXAlignment.Left
     idLabel.TextTruncate = Enum.TextTruncate.AtEnd
@@ -224,8 +263,8 @@ local function createLogEntryRow(data)
     nameLabel.TextColor3 = data.isImportant and Color3.fromRGB(100, 255, 100) or Library.FontColor
     nameLabel.Text = data.animName or "Unknown"
     nameLabel.BackgroundTransparency = 1
-    nameLabel.Position = UDim2.new(0, 173, 0, 0)
-    nameLabel.Size = UDim2.new(0, 120, 1, 0)
+    nameLabel.Position = UDim2.new(0, 158, 0, 0)
+    nameLabel.Size = UDim2.new(0, 100, 1, 0)
     nameLabel.TextSize = 11
     nameLabel.TextXAlignment = Enum.TextXAlignment.Left
     nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
@@ -239,12 +278,40 @@ local function createLogEntryRow(data)
     distLabel.TextColor3 = Library.FontColor
     distLabel.Text = string.format("%.0f", data.distance or 0)
     distLabel.BackgroundTransparency = 1
-    distLabel.Position = UDim2.new(0, 297, 0, 0)
-    distLabel.Size = UDim2.new(0, 35, 1, 0)
+    distLabel.Position = UDim2.new(0, 262, 0, 0)
+    distLabel.Size = UDim2.new(0, 30, 1, 0)
     distLabel.TextSize = 11
     distLabel.TextXAlignment = Enum.TextXAlignment.Left
     distLabel.ClipsDescendants = true
     distLabel.Parent = row
+
+    -- Speed
+    local speedLabel = Instance.new("TextLabel")
+    speedLabel.Name = "Speed"
+    speedLabel.FontFace = FONT_FACE
+    speedLabel.TextColor3 = data.speed ~= 1 and Color3.fromRGB(255, 180, 100) or Library.FontColor
+    speedLabel.Text = string.format("%.2f", data.speed or 1)
+    speedLabel.BackgroundTransparency = 1
+    speedLabel.Position = UDim2.new(0, 296, 0, 0)
+    speedLabel.Size = UDim2.new(0, 35, 1, 0)
+    speedLabel.TextSize = 11
+    speedLabel.TextXAlignment = Enum.TextXAlignment.Left
+    speedLabel.ClipsDescendants = true
+    speedLabel.Parent = row
+
+    -- Length (duration)
+    local lengthLabel = Instance.new("TextLabel")
+    lengthLabel.Name = "Length"
+    lengthLabel.FontFace = FONT_FACE
+    lengthLabel.TextColor3 = Library.FontColor
+    lengthLabel.Text = string.format("%.2f", data.length or 0)
+    lengthLabel.BackgroundTransparency = 1
+    lengthLabel.Position = UDim2.new(0, 335, 0, 0)
+    lengthLabel.Size = UDim2.new(0, 35, 1, 0)
+    lengthLabel.TextSize = 11
+    lengthLabel.TextXAlignment = Enum.TextXAlignment.Left
+    lengthLabel.ClipsDescendants = true
+    lengthLabel.Parent = row
 
     -- Priority
     local priorityLabel = Instance.new("TextLabel")
@@ -253,7 +320,7 @@ local function createLogEntryRow(data)
     priorityLabel.TextColor3 = Library.FontColor
     priorityLabel.Text = data.priority:sub(1, 4)
     priorityLabel.BackgroundTransparency = 1
-    priorityLabel.Position = UDim2.new(0, 336, 0, 0)
+    priorityLabel.Position = UDim2.new(0, 374, 0, 0)
     priorityLabel.Size = UDim2.new(0, 35, 1, 0)
     priorityLabel.TextSize = 11
     priorityLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -291,6 +358,8 @@ local function createLogEntryRow(data)
     Library:AddToRegistry(row, { BackgroundColor3 = "MainColor" }, true)
     Library:AddToRegistry(idLabel, { TextColor3 = "AccentColor" }, true)
     Library:AddToRegistry(distLabel, { TextColor3 = "FontColor" }, true)
+    Library:AddToRegistry(speedLabel, { TextColor3 = "FontColor" }, true)
+    Library:AddToRegistry(lengthLabel, { TextColor3 = "FontColor" }, true)
     Library:AddToRegistry(priorityLabel, { TextColor3 = "FontColor" }, true)
     Library:AddToRegistry(copyBtn, { BackgroundColor3 = "MainColor", TextColor3 = "FontColor" }, true)
     Library:AddToRegistry(previewBtn, { BackgroundColor3 = "MainColor", TextColor3 = "FontColor" }, true)
@@ -368,7 +437,7 @@ local function updateLogDisplay()
 end
 
 -- Add a new log entry
-local function addLogEntry(entityName, animId, animName, priority, isPlayer, distance, isImportant)
+local function addLogEntry(entityName, animId, animName, priority, isPlayer, distance, isImportant, speed, length)
     local formattedId = formatAnimationId(animId)
 
     local entry = {
@@ -380,6 +449,8 @@ local function addLogEntry(entityName, animId, animName, priority, isPlayer, dis
         isPlayer = isPlayer,
         distance = distance,
         isImportant = isImportant,
+        speed = speed or 1,
+        length = length or 0,
         timestamp = os.clock()
     }
 
@@ -401,7 +472,7 @@ local function addLogEntry(entityName, animId, animName, priority, isPlayer, dis
     end
 end
 
--- Handle animation played event
+-- Handle animation played event (like Lycoris AnimatorDefender.process)
 local function onAnimationPlayed(animator, track)
     if not isLogging then return end
     if not track or not track.Animation then return end
@@ -438,7 +509,26 @@ local function onAnimationPlayed(animator, track)
         end
     end
 
-    addLogEntry(entityName, animId, animName, priority, isPlayer, distance, isImportant)
+    -- Start tracking playback data (like Lycoris pbdata)
+    local pbdata = PlaybackData.new(track, entity)
+    activePlaybacks[track] = pbdata
+    
+    -- Track when animation ends to record final data
+    local conn
+    conn = track.Stopped:Connect(function()
+        if conn then conn:Disconnect() end
+        
+        -- Move to recorded playbacks
+        local formattedId = formatAnimationId(animId)
+        recordedPlaybacks[formattedId] = pbdata
+        activePlaybacks[track] = nil
+    end)
+    
+    -- Get initial speed and length
+    local speed = track.Speed
+    local length = track.Length
+
+    addLogEntry(entityName, animId, animName, priority, isPlayer, distance, isImportant, speed, length)
 end
 
 -- Track an animator
@@ -478,6 +568,22 @@ local function startLogging()
         end
     end)
     table.insert(connections, descendantConn)
+    
+    -- Update loop for playback tracking (like Lycoris AnimatorDefender.update)
+    local updateConn = RunService.RenderStepped:Connect(function()
+        for track, pbdata in pairs(activePlaybacks) do
+            if not track.IsPlaying then
+                -- Clean up finished tracks
+                local formattedId = formatAnimationId(track.Animation.AnimationId)
+                recordedPlaybacks[formattedId] = pbdata
+                activePlaybacks[track] = nil
+            else
+                -- Update playback data
+                pbdata:update()
+            end
+        end
+    end)
+    table.insert(connections, updateConn)
 end
 
 -- Stop logging
@@ -632,11 +738,13 @@ function AnimationLogger.init(lib, animVis)
     headerRow.Parent = inner
 
     local headers = {
-        { name = "Entity", pos = 4, width = 70 },
-        { name = "Anim ID", pos = 74, width = 95 },
-        { name = "Name", pos = 173, width = 120 },
-        { name = "Dist", pos = 297, width = 35 },
-        { name = "Prio", pos = 336, width = 35 },
+        { name = "Entity", pos = 4, width = 60 },
+        { name = "Anim ID", pos = 64, width = 90 },
+        { name = "Name", pos = 158, width = 100 },
+        { name = "Dist", pos = 262, width = 30 },
+        { name = "Spd", pos = 296, width = 35 },
+        { name = "Len", pos = 335, width = 35 },
+        { name = "Prio", pos = 374, width = 35 },
     }
 
     for _, header in ipairs(headers) do
@@ -875,9 +983,65 @@ end
 function AnimationLogger.detach()
     stopLogging()
     cleanConnections()
+    activePlaybacks = {}
+    recordedPlaybacks = {}
     if ScreenGui then
         ScreenGui:Destroy()
     end
+end
+
+-- Get playback data for an animation ID (like Lycoris Defense.agpd)
+function AnimationLogger.getPlaybackData(animId)
+    local formattedId = formatAnimationId(animId)
+    return recordedPlaybacks[formattedId]
+end
+
+-- Get all recorded playback data
+function AnimationLogger.getAllPlaybackData()
+    return recordedPlaybacks
+end
+
+-- Get all logged entries
+function AnimationLogger.getLogEntries()
+    return logEntries
+end
+
+-- Export timing data for an animation (useful for creating timing configs)
+function AnimationLogger.exportTimingData(animId)
+    local formattedId = formatAnimationId(animId)
+    local pbdata = recordedPlaybacks[formattedId]
+    
+    -- Find the log entry for this animation
+    local entry = nil
+    for _, e in ipairs(logEntries) do
+        if e.animId == formattedId then
+            entry = e
+            break
+        end
+    end
+    
+    if not entry then return nil end
+    
+    return {
+        -- Animation info
+        animId = "rbxassetid://" .. formattedId,
+        name = entry.animName,
+        priority = entry.priority,
+        
+        -- Timing info (for defender configs like Lycoris)
+        length = entry.length,
+        speed = entry.speed,
+        avgSpeed = pbdata and pbdata:getAvgSpeed() or entry.speed,
+        duration = pbdata and pbdata:getDuration() or entry.length,
+        
+        -- Entity info
+        entityName = entry.entityName,
+        isPlayer = entry.isPlayer,
+        isImportant = entry.isImportant,
+        
+        -- Suggested timing (can be used as a starting point)
+        suggestedParryTime = entry.length * 0.5 * 1000, -- mid-point in ms
+    }
 end
 
 -- Return module
