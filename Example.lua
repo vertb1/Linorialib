@@ -4,12 +4,7 @@ local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/SaveManager.lua"))()
 
 local Window = Library:CreateWindow({
-    -- Set Center to true if you want the menu to appear in the center
-    -- Set AutoShow to true if you want the menu to appear when it is created
-    -- Position and Size are also valid options here
-    -- but you do not need to define them unless you are changing them :)
-
-    Title = 'Example menu',
+    Title = 'dxe.exe',
     Center = true,
     AutoShow = true,
     TabPadding = 8,
@@ -322,25 +317,40 @@ SubDepbox:SetupDependencies({
 -- Sets the watermark visibility
 Library:SetWatermarkVisibility(true)
 
--- Example of dynamically-updating watermark with common traits (fps and ping)
+-- Watermark with useful info
 local FrameTimer = tick()
-local FrameCounter = 0;
-local FPS = 60;
+local FrameCounter = 0
+local FPS = 60
+
+local function GetTime()
+    local Hour = math.floor((tick() % 86400) / 3600)
+    local Minute = math.floor((tick() % 3600) / 60)
+    local Second = math.floor(tick() % 60)
+    local AMPM = Hour >= 12 and 'PM' or 'AM'
+    Hour = Hour % 12
+    if Hour == 0 then Hour = 12 end
+    return string.format('%02d:%02d:%02d %s', Hour, Minute, Second, AMPM)
+end
 
 local WatermarkConnection = game:GetService('RunService').RenderStepped:Connect(function()
-    FrameCounter += 1;
+    FrameCounter += 1
 
     if (tick() - FrameTimer) >= 1 then
-        FPS = FrameCounter;
-        FrameTimer = tick();
-        FrameCounter = 0;
-    end;
+        FPS = FrameCounter
+        FrameTimer = tick()
+        FrameCounter = 0
+    end
 
-    Library:SetWatermark(('LinoriaLib demo | %s fps | %s ms'):format(
+    local Ping = math.floor(game:GetService('Stats').Network.ServerStatsItem['Data Ping']:GetValue())
+    local Memory = math.floor(game:GetService('Stats'):GetTotalMemoryUsageMb())
+    
+    Library:SetWatermark(('dxe.exe | %s fps | %s ms | %s mb | %s'):format(
         math.floor(FPS),
-        math.floor(game:GetService('Stats').Network.ServerStatsItem['Data Ping']:GetValue())
-    ));
-end);
+        Ping,
+        Memory,
+        GetTime()
+    ))
+end)
 
 Library.KeybindFrame.Visible = true; -- todo: add a function for this
 
