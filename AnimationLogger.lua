@@ -98,11 +98,9 @@ local filterText = ""
 local showNpcsOnly = false
 local showPlayersOnly = false
 local autoCopy = false
-local combatOnly = false
 local maxDistance = 100
 local distanceSliderFill = nil
 local distanceLabel = nil
-local combatOnlyButton = nil
 
 -- Playback tracking (like Lycoris)
 local activePlaybacks = {} -- track -> PlaybackData
@@ -515,20 +513,19 @@ local function onAnimationPlayed(animator, track)
     -- Check if it's an action priority (combat animations use Action priority)
     local isActionPriority = priority == "Action" or priority == "Action2" or priority == "Action3" or priority == "Action4"
     
+    -- ALWAYS filter movement animations - only log combat/action animations
+    -- Skip Core/Idle/Movement priority (these are movement/idle anims)
+    if priority == "Core" or priority == "Idle" or priority == "Movement" then
+        return
+    end
+    
+    -- Skip if name matches ignored patterns (unless it's Action priority)
+    if isIgnoredAnimation(animName) and not isActionPriority then
+        return
+    end
+    
     -- Check if name matches important patterns
     local isImportant = isImportantAnimation(animName) or isActionPriority
-    
-    -- Combat only filter - STRICT: only show Action priority or important named anims
-    if combatOnly then
-        -- Always skip if it matches ignored patterns (unless it's Action priority)
-        if isIgnoredAnimation(animName) and not isActionPriority then
-            return
-        end
-        -- Also skip Core priority anims (these are usually movement/idle)
-        if priority == "Core" or priority == "Idle" or priority == "Movement" then
-            return
-        end
-    end
 
     -- Start tracking playback data (like Lycoris pbdata)
     local pbdata = PlaybackData.new(track, entity)
@@ -679,12 +676,6 @@ end
 local function toggleAutoCopy()
     autoCopy = not autoCopy
     autoCopyButton.TextColor3 = autoCopy and Library.AccentColor or Library.FontColor
-end
-
--- Toggle combat only
-local function toggleCombatOnly()
-    combatOnly = not combatOnly
-    combatOnlyButton.TextColor3 = combatOnly and Library.AccentColor or Library.FontColor
 end
 
 -- Update distance slider
@@ -891,18 +882,6 @@ function AnimationLogger.init(lib, animVis)
     playerFilterButton.TextSize = 12
     playerFilterButton.Parent = controlBar
 
-    combatOnlyButton = Instance.new("TextButton")
-    combatOnlyButton.Name = "CombatOnly"
-    combatOnlyButton.FontFace = FONT_FACE
-    combatOnlyButton.TextColor3 = Library.FontColor
-    combatOnlyButton.Text = "Combat Only"
-    combatOnlyButton.BackgroundColor3 = Library.MainColor
-    combatOnlyButton.BorderColor3 = BLACK_OUTLINE
-    combatOnlyButton.Position = UDim2.new(0, 113, 0, 26)
-    combatOnlyButton.Size = UDim2.new(0, 85, 0, 20)
-    combatOnlyButton.TextSize = 12
-    combatOnlyButton.Parent = controlBar
-
     autoCopyButton = Instance.new("TextButton")
     autoCopyButton.Name = "AutoCopy"
     autoCopyButton.FontFace = FONT_FACE
@@ -910,7 +889,7 @@ function AnimationLogger.init(lib, animVis)
     autoCopyButton.Text = "Auto Copy"
     autoCopyButton.BackgroundColor3 = Library.MainColor
     autoCopyButton.BorderColor3 = BLACK_OUTLINE
-    autoCopyButton.Position = UDim2.new(0, 202, 0, 26)
+    autoCopyButton.Position = UDim2.new(0, 113, 0, 26)
     autoCopyButton.Size = UDim2.new(0, 70, 0, 20)
     autoCopyButton.TextSize = 12
     autoCopyButton.Parent = controlBar
@@ -993,7 +972,6 @@ function AnimationLogger.init(lib, animVis)
     Library:AddToRegistry(clearButton, { BackgroundColor3 = "MainColor", TextColor3 = "FontColor" }, true)
     Library:AddToRegistry(npcFilterButton, { BackgroundColor3 = "MainColor" }, true)
     Library:AddToRegistry(playerFilterButton, { BackgroundColor3 = "MainColor" }, true)
-    Library:AddToRegistry(combatOnlyButton, { BackgroundColor3 = "MainColor" }, true)
     Library:AddToRegistry(autoCopyButton, { BackgroundColor3 = "MainColor" }, true)
     Library:AddToRegistry(distanceLabel, { TextColor3 = "FontColor" }, true)
     Library:AddToRegistry(distanceSliderInner, { BackgroundColor3 = "MainColor" }, true)
@@ -1009,7 +987,6 @@ function AnimationLogger.init(lib, animVis)
     clearButton.MouseButton1Click:Connect(clearLogs)
     npcFilterButton.MouseButton1Click:Connect(toggleNpcFilter)
     playerFilterButton.MouseButton1Click:Connect(togglePlayerFilter)
-    combatOnlyButton.MouseButton1Click:Connect(toggleCombatOnly)
     autoCopyButton.MouseButton1Click:Connect(toggleAutoCopy)
 
     -- Store reference in Library
