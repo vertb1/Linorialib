@@ -3249,7 +3249,7 @@ local Toggles = {}
 
 					if Root then
 						local Marker = Instance.new("Part")
-						Marker.Name = "LycorisMarker"
+						Marker.Name = "dxeMarker"
 						Marker.Size = Vector3.new(1, 1, 1)
 						Marker.Anchored = true
 						Marker.CanCollide = false
@@ -3564,7 +3564,7 @@ local Toggles = {}
 	end
 
 	function Library:ManuallyManagedNotify(Text)
-		if shared.Lycoris.silent then
+		if shared.dxe.silent then
 			return
 		end
 
@@ -3683,7 +3683,7 @@ local Toggles = {}
 	end
 
 	function Library:Notify(Text, Time)
-		if shared.Lycoris.silent then
+		if shared.dxe.silent then
 			return
 		end
 
