@@ -1,3 +1,6 @@
+-- Initialize shared.dxe table (required for Library notifications)
+shared.dxe = shared.dxe or {}
+shared.dxe.silent = true -- Start with notifications disabled by default
 
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/Library.lua"))()
 local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/ThemeManager.lua"))()
@@ -586,12 +589,34 @@ ToolsGroup:AddToggle('AnimLoggerToggle', {
     Tooltip = 'Log animations played by entities'
 })
 
+ToolsGroup:AddDivider()
+
+ToolsGroup:AddToggle('DebugNotifications', {
+    Text = 'Debug Notifications',
+    Default = false,
+    Tooltip = 'Show UI debug/info notifications'
+})
+
+ToolsGroup:AddToggle('ShowHitboxes', {
+    Text = 'Show Hitboxes',
+    Default = false,
+    Tooltip = 'Visualize attack hitboxes when animation logging'
+})
+
 Toggles.AnimVisualizerToggle:OnChanged(function()
     AnimationVisualizer.visible(Toggles.AnimVisualizerToggle.Value)
 end)
 
 Toggles.AnimLoggerToggle:OnChanged(function()
     AnimationLogger.visible(Toggles.AnimLoggerToggle.Value)
+end)
+
+Toggles.DebugNotifications:OnChanged(function()
+    shared.dxe.silent = not Toggles.DebugNotifications.Value
+end)
+
+Toggles.ShowHitboxes:OnChanged(function()
+    shared.dxe.showHitboxes = Toggles.ShowHitboxes.Value
 end)
 
 Library.ToggleKeybind = Options.MenuKeybind -- Allows you to have a custom keybind for the menu
@@ -610,13 +635,13 @@ SaveManager:IgnoreThemeSettings()
 
 -- Adds our MenuKeybind to the ignore list
 -- (do you want each config to have a different menu key? probably not.)
-SaveManager:SetIgnoreIndexes({ 'MenuKeybind', 'WatermarkKeybind', 'KeybindListKeybind' })
+SaveManager:SetIgnoreIndexes({ 'MenuKeybind', 'WatermarkKeybind', 'KeybindListKeybind', 'DebugNotifications', 'ShowHitboxes' })
 
 -- use case for doing it this way:
 -- a script hub could have themes in a global folder
 -- and game configs in a separate folder per game
-ThemeManager:SetFolder('MyScriptHub')
-SaveManager:SetFolder('MyScriptHub/specific-game')
+ThemeManager:SetFolder('dxe')
+SaveManager:SetFolder('dxe/configs')
 
 -- Builds our config menu on the right side of our tab
 SaveManager:BuildConfigSection(Tabs['UI Settings'])
