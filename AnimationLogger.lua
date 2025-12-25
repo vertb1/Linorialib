@@ -6,14 +6,33 @@ local AnimationLogger = {}
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- Constants
 local MAX_LOG_ENTRIES = 100
 local FONT_FACE = Font.new("rbxasset://fonts/families/RobotoMono.json")
 local ROW_HEIGHT = 18
 local HEADER_HEIGHT = 26
-local WINDOW_WIDTH = 420
-local WINDOW_HEIGHT = 350
+local WINDOW_WIDTH = 460
+local WINDOW_HEIGHT = 420
+local BLACK_OUTLINE = Color3.new(0, 0, 0)
+
+-- Animation name patterns to ignore (movement animations)
+local IGNORED_PATTERNS = {
+    "run", "walk", "sprint", "dash", "dodge", "roll", "jump", "fall", "land", "idle", 
+    "climb", "swim", "crawl", "crouch", "slide", "vault", "mantle", "locomotion",
+    "breathing", "emote", "pose", "stance", "standing", "sitting", "laying"
+}
+
+-- Important animation patterns (combat)
+local IMPORTANT_PATTERNS = {
+    "sword", "fist", "punch", "kick", "slash", "cut", "swing", "stab", "thrust",
+    "heavy", "light", "combo", "attack", "hit", "strike", "parry", "block", "guard",
+    "critical", "crit", "uppercut", "haymaker", "jab", "hook", "mantrastyle",
+    "rapier", "spear", "axe", "hammer", "dagger", "greatsword", "katana", "gun",
+    "bow", "staff", "wand", "gauntlet", "claw", "whip", "scythe", "halberd",
+    "m1", "m2", "ability", "skill", "spell", "mantra", "feint", "grab", "throw"
+}
 
 -- Will be set when init is called
 local Library = nil
@@ -35,12 +54,20 @@ local filterText = ""
 local showNpcsOnly = false
 local showPlayersOnly = false
 local autoCopy = false
+local combatOnly = false
+local maxDistance = 100
+local distanceSliderFill = nil
+local distanceLabel = nil
+local combatOnlyButton = nil
 
 -- UI References
 local outer, inner, scrollFrame, listLayout
 local filterTextbox, clearButton, toggleLoggingButton
 local npcFilterButton, playerFilterButton, autoCopyButton
 local entryCountLabel
+
+-- Animation name cache (try to find real names)
+local animationNameCache = {}
 
 -- Clean all connections
 local function cleanConnections()
@@ -62,6 +89,83 @@ local function formatAnimationId(animId)
     return id
 end
 
+-- Try to get the real animation name from various sources
+local function getRealAnimationName(track, animId)
+    local formattedId = formatAnimationId(animId)
+    
+    -- Check cache first
+    if animationNameCache[formattedId] then
+        return animationNameCache[formattedId]
+    end
+    
+    local name = track.Animation.Name
+    
+    -- If name is just "Animation" or empty, try to find better name
+    if name == "Animation" or name == "" or name:match("^%d+$") then
+        -- Try to get from animation instance name in ReplicatedStorage
+        pcall(function()
+            for _, child in pairs(ReplicatedStorage:GetDescendants()) do
+                if child:IsA("Animation") and formatAnimationId(child.AnimationId) == formattedId then
+                    if child.Name ~= "Animation" and child.Name ~= "" then
+                        name = child.Name
+                        break
+                    end
+                end
+            end
+        end)
+    end
+    
+    -- Still no good name? Try the track name
+    if name == "Animation" or name == "" then
+        local trackName = tostring(track):match("Animation (.+)") or ""
+        if trackName ~= "" and trackName ~= "Animation" then
+            name = trackName
+        end
+    end
+    
+    -- Cache it
+    animationNameCache[formattedId] = name
+    return name
+end
+
+-- Check if animation name matches ignored patterns
+local function isIgnoredAnimation(animName)
+    local lowerName = animName:lower()
+    for _, pattern in ipairs(IGNORED_PATTERNS) do
+        if lowerName:find(pattern) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Check if animation name matches important/combat patterns
+local function isImportantAnimation(animName)
+    local lowerName = animName:lower()
+    for _, pattern in ipairs(IMPORTANT_PATTERNS) do
+        if lowerName:find(pattern) then
+            return true
+        end
+    end
+    -- Also check priority - Action and above are usually important
+    return false
+end
+
+-- Get distance from local player to entity
+local function getDistanceToEntity(entity)
+    local localPlayer = Players.LocalPlayer
+    local character = localPlayer and localPlayer.Character
+    if not character then return math.huge end
+    
+    local localRoot = character:FindFirstChild("HumanoidRootPart")
+    if not localRoot then return math.huge end
+    
+    local entityRoot = entity:FindFirstChild("HumanoidRootPart") or entity:FindFirstChild("Torso") or entity.PrimaryPart
+    if not entityRoot then return math.huge end
+    
+    return (localRoot.Position - entityRoot.Position).Magnitude
+end
+
 -- Copy text to clipboard if available
 local function copyToClipboard(text)
     if setclipboard then
@@ -79,7 +183,7 @@ local function createLogEntryRow(data)
     local row = Instance.new("Frame")
     row.Name = "LogEntry_" .. data.id
     row.BackgroundColor3 = Library.MainColor
-    row.BorderColor3 = Library.OutlineColor
+    row.BorderColor3 = BLACK_OUTLINE
     row.BorderMode = Enum.BorderMode.Inset
     row.Size = UDim2.new(1, -4, 0, ROW_HEIGHT)
 
@@ -91,7 +195,7 @@ local function createLogEntryRow(data)
     entityLabel.Text = data.entityName
     entityLabel.BackgroundTransparency = 1
     entityLabel.Position = UDim2.new(0, 4, 0, 0)
-    entityLabel.Size = UDim2.new(0, 80, 1, 0)
+    entityLabel.Size = UDim2.new(0, 70, 1, 0)
     entityLabel.TextSize = 11
     entityLabel.TextXAlignment = Enum.TextXAlignment.Left
     entityLabel.TextTruncate = Enum.TextTruncate.AtEnd
@@ -105,8 +209,8 @@ local function createLogEntryRow(data)
     idLabel.TextColor3 = Library.AccentColor
     idLabel.Text = data.animId
     idLabel.BackgroundTransparency = 1
-    idLabel.Position = UDim2.new(0, 88, 0, 0)
-    idLabel.Size = UDim2.new(0, 110, 1, 0)
+    idLabel.Position = UDim2.new(0, 74, 0, 0)
+    idLabel.Size = UDim2.new(0, 95, 1, 0)
     idLabel.TextSize = 11
     idLabel.TextXAlignment = Enum.TextXAlignment.Left
     idLabel.TextTruncate = Enum.TextTruncate.AtEnd
@@ -117,26 +221,40 @@ local function createLogEntryRow(data)
     local nameLabel = Instance.new("TextLabel")
     nameLabel.Name = "AnimName"
     nameLabel.FontFace = FONT_FACE
-    nameLabel.TextColor3 = Library.FontColor
+    nameLabel.TextColor3 = data.isImportant and Color3.fromRGB(100, 255, 100) or Library.FontColor
     nameLabel.Text = data.animName or "Unknown"
     nameLabel.BackgroundTransparency = 1
-    nameLabel.Position = UDim2.new(0, 202, 0, 0)
-    nameLabel.Size = UDim2.new(0, 100, 1, 0)
+    nameLabel.Position = UDim2.new(0, 173, 0, 0)
+    nameLabel.Size = UDim2.new(0, 120, 1, 0)
     nameLabel.TextSize = 11
     nameLabel.TextXAlignment = Enum.TextXAlignment.Left
     nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
     nameLabel.ClipsDescendants = true
     nameLabel.Parent = row
 
+    -- Distance
+    local distLabel = Instance.new("TextLabel")
+    distLabel.Name = "Distance"
+    distLabel.FontFace = FONT_FACE
+    distLabel.TextColor3 = Library.FontColor
+    distLabel.Text = string.format("%.0f", data.distance or 0)
+    distLabel.BackgroundTransparency = 1
+    distLabel.Position = UDim2.new(0, 297, 0, 0)
+    distLabel.Size = UDim2.new(0, 35, 1, 0)
+    distLabel.TextSize = 11
+    distLabel.TextXAlignment = Enum.TextXAlignment.Left
+    distLabel.ClipsDescendants = true
+    distLabel.Parent = row
+
     -- Priority
     local priorityLabel = Instance.new("TextLabel")
     priorityLabel.Name = "Priority"
     priorityLabel.FontFace = FONT_FACE
     priorityLabel.TextColor3 = Library.FontColor
-    priorityLabel.Text = data.priority
+    priorityLabel.Text = data.priority:sub(1, 4)
     priorityLabel.BackgroundTransparency = 1
-    priorityLabel.Position = UDim2.new(0, 306, 0, 0)
-    priorityLabel.Size = UDim2.new(0, 50, 1, 0)
+    priorityLabel.Position = UDim2.new(0, 336, 0, 0)
+    priorityLabel.Size = UDim2.new(0, 35, 1, 0)
     priorityLabel.TextSize = 11
     priorityLabel.TextXAlignment = Enum.TextXAlignment.Left
     priorityLabel.TextTruncate = Enum.TextTruncate.AtEnd
@@ -150,7 +268,7 @@ local function createLogEntryRow(data)
     copyBtn.TextColor3 = Library.FontColor
     copyBtn.Text = "Copy"
     copyBtn.BackgroundColor3 = Library.MainColor
-    copyBtn.BorderColor3 = Library.OutlineColor
+    copyBtn.BorderColor3 = BLACK_OUTLINE
     copyBtn.Position = UDim2.new(1, -42, 0, 2)
     copyBtn.Size = UDim2.new(0, 38, 0, ROW_HEIGHT - 4)
     copyBtn.TextSize = 10
@@ -163,19 +281,19 @@ local function createLogEntryRow(data)
     previewBtn.TextColor3 = Library.FontColor
     previewBtn.Text = "▶"
     previewBtn.BackgroundColor3 = Library.MainColor
-    previewBtn.BorderColor3 = Library.OutlineColor
+    previewBtn.BorderColor3 = BLACK_OUTLINE
     previewBtn.Position = UDim2.new(1, -62, 0, 2)
     previewBtn.Size = UDim2.new(0, 18, 0, ROW_HEIGHT - 4)
     previewBtn.TextSize = 10
     previewBtn.Parent = row
 
-    -- Register colors
-    Library:AddToRegistry(row, { BackgroundColor3 = "MainColor", BorderColor3 = "OutlineColor" }, true)
+    -- Register colors (but NOT border - keep it black)
+    Library:AddToRegistry(row, { BackgroundColor3 = "MainColor" }, true)
     Library:AddToRegistry(idLabel, { TextColor3 = "AccentColor" }, true)
-    Library:AddToRegistry(nameLabel, { TextColor3 = "FontColor" }, true)
+    Library:AddToRegistry(distLabel, { TextColor3 = "FontColor" }, true)
     Library:AddToRegistry(priorityLabel, { TextColor3 = "FontColor" }, true)
-    Library:AddToRegistry(copyBtn, { BackgroundColor3 = "MainColor", BorderColor3 = "OutlineColor", TextColor3 = "FontColor" }, true)
-    Library:AddToRegistry(previewBtn, { BackgroundColor3 = "MainColor", BorderColor3 = "OutlineColor", TextColor3 = "FontColor" }, true)
+    Library:AddToRegistry(copyBtn, { BackgroundColor3 = "MainColor", TextColor3 = "FontColor" }, true)
+    Library:AddToRegistry(previewBtn, { BackgroundColor3 = "MainColor", TextColor3 = "FontColor" }, true)
 
     -- Copy button click
     copyBtn.MouseButton1Click:Connect(function()
@@ -250,7 +368,7 @@ local function updateLogDisplay()
 end
 
 -- Add a new log entry
-local function addLogEntry(entityName, animId, animName, priority, isPlayer)
+local function addLogEntry(entityName, animId, animName, priority, isPlayer, distance, isImportant)
     local formattedId = formatAnimationId(animId)
 
     local entry = {
@@ -260,6 +378,8 @@ local function addLogEntry(entityName, animId, animName, priority, isPlayer)
         animName = animName,
         priority = priority,
         isPlayer = isPlayer,
+        distance = distance,
+        isImportant = isImportant,
         timestamp = os.clock()
     }
 
@@ -288,19 +408,37 @@ local function onAnimationPlayed(animator, track)
 
     local entity = animator:FindFirstAncestorWhichIsA("Model")
     if not entity then return end
+    
+    -- Skip local player's animations
+    local localPlayer = Players.LocalPlayer
+    if localPlayer and localPlayer.Character == entity then return end
 
     local entityName = entity.Name
     local isPlayer = Players:GetPlayerFromCharacter(entity) ~= nil
+    
+    -- Distance check
+    local distance = getDistanceToEntity(entity)
+    if distance > maxDistance then return end
 
     -- Apply filters early for performance
     if showNpcsOnly and isPlayer then return end
     if showPlayersOnly and not isPlayer then return end
 
     local animId = track.Animation.AnimationId
-    local animName = track.Animation.Name
+    local animName = getRealAnimationName(track, animId)
     local priority = track.Priority.Name
+    
+    -- Check if it's an important animation
+    local isImportant = isImportantAnimation(animName) or priority == "Action" or priority == "Action2" or priority == "Action3" or priority == "Action4"
+    
+    -- Combat only filter
+    if combatOnly then
+        if isIgnoredAnimation(animName) and not isImportant then
+            return
+        end
+    end
 
-    addLogEntry(entityName, animId, animName, priority, isPlayer)
+    addLogEntry(entityName, animId, animName, priority, isPlayer, distance, isImportant)
 end
 
 -- Track an animator
@@ -400,6 +538,20 @@ local function toggleAutoCopy()
     autoCopyButton.TextColor3 = autoCopy and Library.AccentColor or Library.FontColor
 end
 
+-- Toggle combat only
+local function toggleCombatOnly()
+    combatOnly = not combatOnly
+    combatOnlyButton.TextColor3 = combatOnly and Library.AccentColor or Library.FontColor
+end
+
+-- Update distance slider
+local function updateDistanceSlider(value)
+    maxDistance = value
+    local percentage = (value - 10) / (500 - 10)
+    distanceSliderFill.Size = UDim2.new(percentage, 0, 1, 0)
+    distanceLabel.Text = string.format("Range: %d", value)
+end
+
 -- Set visibility
 function AnimationLogger.visible(state)
     ScreenGui.Enabled = state
@@ -420,8 +572,8 @@ function AnimationLogger.init(lib, animVis)
     outer = Instance.new("Frame")
     outer.Name = "Outer"
     outer.BackgroundColor3 = Color3.new(1, 1, 1)
-    outer.Position = UDim2.new(0.5, 0, 0.216, 0)
-    outer.BorderColor3 = Color3.new()
+    outer.Position = UDim2.new(0.5, 0, 0.15, 0)
+    outer.BorderColor3 = BLACK_OUTLINE
     outer.Size = UDim2.new(0, WINDOW_WIDTH, 0, WINDOW_HEIGHT)
     outer.ZIndex = 100
     outer.Parent = ScreenGui
@@ -431,7 +583,7 @@ function AnimationLogger.init(lib, animVis)
     inner.Name = "Inner"
     inner.BackgroundColor3 = Library.MainColor
     inner.BorderMode = Enum.BorderMode.Inset
-    inner.BorderColor3 = Library.OutlineColor
+    inner.BorderColor3 = BLACK_OUTLINE
     inner.Size = UDim2.new(1, 0, 1, 0)
     inner.Parent = outer
 
@@ -473,17 +625,18 @@ function AnimationLogger.init(lib, animVis)
     local headerRow = Instance.new("Frame")
     headerRow.Name = "HeaderRow"
     headerRow.BackgroundColor3 = Library.MainColor
-    headerRow.BorderColor3 = Library.OutlineColor
+    headerRow.BorderColor3 = BLACK_OUTLINE
     headerRow.BorderMode = Enum.BorderMode.Inset
     headerRow.Position = UDim2.new(0, 4, 0, HEADER_HEIGHT)
     headerRow.Size = UDim2.new(1, -8, 0, ROW_HEIGHT)
     headerRow.Parent = inner
 
     local headers = {
-        { name = "Entity", pos = 4, width = 80 },
-        { name = "Anim ID", pos = 88, width = 110 },
-        { name = "Name", pos = 202, width = 100 },
-        { name = "Priority", pos = 306, width = 50 },
+        { name = "Entity", pos = 4, width = 70 },
+        { name = "Anim ID", pos = 74, width = 95 },
+        { name = "Name", pos = 173, width = 120 },
+        { name = "Dist", pos = 297, width = 35 },
+        { name = "Prio", pos = 336, width = 35 },
     }
 
     for _, header in ipairs(headers) do
@@ -505,10 +658,10 @@ function AnimationLogger.init(lib, animVis)
     scrollFrame = Instance.new("ScrollingFrame")
     scrollFrame.Name = "ScrollFrame"
     scrollFrame.BackgroundColor3 = Library.MainColor
-    scrollFrame.BorderColor3 = Library.OutlineColor
+    scrollFrame.BorderColor3 = BLACK_OUTLINE
     scrollFrame.BorderMode = Enum.BorderMode.Inset
     scrollFrame.Position = UDim2.new(0, 4, 0, HEADER_HEIGHT + ROW_HEIGHT + 4)
-    scrollFrame.Size = UDim2.new(1, -8, 1, -(HEADER_HEIGHT + ROW_HEIGHT + 4 + 60))
+    scrollFrame.Size = UDim2.new(1, -8, 1, -(HEADER_HEIGHT + ROW_HEIGHT + 4 + 100))
     scrollFrame.ScrollBarThickness = 4
     scrollFrame.ScrollBarImageColor3 = Library.AccentColor
     scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
@@ -524,11 +677,11 @@ function AnimationLogger.init(lib, animVis)
     local controlBar = Instance.new("Frame")
     controlBar.Name = "ControlBar"
     controlBar.BackgroundTransparency = 1
-    controlBar.Position = UDim2.new(0, 4, 1, -54)
-    controlBar.Size = UDim2.new(1, -8, 0, 50)
+    controlBar.Position = UDim2.new(0, 4, 1, -94)
+    controlBar.Size = UDim2.new(1, -8, 0, 90)
     controlBar.Parent = inner
 
-    -- Filter textbox
+    -- Row 1: Filter, Start/Stop, Clear
     filterTextbox = Instance.new("TextBox")
     filterTextbox.Name = "FilterTextbox"
     filterTextbox.FontFace = FONT_FACE
@@ -537,94 +690,169 @@ function AnimationLogger.init(lib, animVis)
     filterTextbox.PlaceholderColor3 = Color3.fromRGB(100, 100, 100)
     filterTextbox.Text = ""
     filterTextbox.BackgroundColor3 = Library.MainColor
-    filterTextbox.BorderColor3 = Library.OutlineColor
+    filterTextbox.BorderColor3 = BLACK_OUTLINE
     filterTextbox.Position = UDim2.new(0, 0, 0, 0)
-    filterTextbox.Size = UDim2.new(0, 120, 0, 20)
+    filterTextbox.Size = UDim2.new(0, 140, 0, 20)
     filterTextbox.TextSize = 12
     filterTextbox.ClearTextOnFocus = false
     filterTextbox.Parent = controlBar
 
-    -- Toggle logging button
     toggleLoggingButton = Instance.new("TextButton")
     toggleLoggingButton.Name = "ToggleLogging"
     toggleLoggingButton.FontFace = FONT_FACE
     toggleLoggingButton.TextColor3 = Library.FontColor
     toggleLoggingButton.Text = "Start Logging"
     toggleLoggingButton.BackgroundColor3 = Library.MainColor
-    toggleLoggingButton.BorderColor3 = Library.OutlineColor
-    toggleLoggingButton.Position = UDim2.new(0, 124, 0, 0)
+    toggleLoggingButton.BorderColor3 = BLACK_OUTLINE
+    toggleLoggingButton.Position = UDim2.new(0, 144, 0, 0)
     toggleLoggingButton.Size = UDim2.new(0, 90, 0, 20)
     toggleLoggingButton.TextSize = 12
     toggleLoggingButton.Parent = controlBar
 
-    -- Clear button
     clearButton = Instance.new("TextButton")
     clearButton.Name = "ClearLogs"
     clearButton.FontFace = FONT_FACE
     clearButton.TextColor3 = Library.FontColor
     clearButton.Text = "Clear"
     clearButton.BackgroundColor3 = Library.MainColor
-    clearButton.BorderColor3 = Library.OutlineColor
-    clearButton.Position = UDim2.new(0, 218, 0, 0)
+    clearButton.BorderColor3 = BLACK_OUTLINE
+    clearButton.Position = UDim2.new(0, 238, 0, 0)
     clearButton.Size = UDim2.new(0, 50, 0, 20)
     clearButton.TextSize = 12
     clearButton.Parent = controlBar
 
-    -- NPC filter button
+    -- Row 2: NPCs, Players, Combat Only, Auto Copy
     npcFilterButton = Instance.new("TextButton")
     npcFilterButton.Name = "NpcFilter"
     npcFilterButton.FontFace = FONT_FACE
     npcFilterButton.TextColor3 = Library.FontColor
     npcFilterButton.Text = "NPCs"
     npcFilterButton.BackgroundColor3 = Library.MainColor
-    npcFilterButton.BorderColor3 = Library.OutlineColor
+    npcFilterButton.BorderColor3 = BLACK_OUTLINE
     npcFilterButton.Position = UDim2.new(0, 0, 0, 26)
     npcFilterButton.Size = UDim2.new(0, 50, 0, 20)
     npcFilterButton.TextSize = 12
     npcFilterButton.Parent = controlBar
 
-    -- Player filter button
     playerFilterButton = Instance.new("TextButton")
     playerFilterButton.Name = "PlayerFilter"
     playerFilterButton.FontFace = FONT_FACE
     playerFilterButton.TextColor3 = Library.FontColor
     playerFilterButton.Text = "Players"
     playerFilterButton.BackgroundColor3 = Library.MainColor
-    playerFilterButton.BorderColor3 = Library.OutlineColor
+    playerFilterButton.BorderColor3 = BLACK_OUTLINE
     playerFilterButton.Position = UDim2.new(0, 54, 0, 26)
     playerFilterButton.Size = UDim2.new(0, 55, 0, 20)
     playerFilterButton.TextSize = 12
     playerFilterButton.Parent = controlBar
 
-    -- Auto copy button
+    combatOnlyButton = Instance.new("TextButton")
+    combatOnlyButton.Name = "CombatOnly"
+    combatOnlyButton.FontFace = FONT_FACE
+    combatOnlyButton.TextColor3 = Library.FontColor
+    combatOnlyButton.Text = "Combat Only"
+    combatOnlyButton.BackgroundColor3 = Library.MainColor
+    combatOnlyButton.BorderColor3 = BLACK_OUTLINE
+    combatOnlyButton.Position = UDim2.new(0, 113, 0, 26)
+    combatOnlyButton.Size = UDim2.new(0, 85, 0, 20)
+    combatOnlyButton.TextSize = 12
+    combatOnlyButton.Parent = controlBar
+
     autoCopyButton = Instance.new("TextButton")
     autoCopyButton.Name = "AutoCopy"
     autoCopyButton.FontFace = FONT_FACE
     autoCopyButton.TextColor3 = Library.FontColor
     autoCopyButton.Text = "Auto Copy"
     autoCopyButton.BackgroundColor3 = Library.MainColor
-    autoCopyButton.BorderColor3 = Library.OutlineColor
-    autoCopyButton.Position = UDim2.new(0, 113, 0, 26)
+    autoCopyButton.BorderColor3 = BLACK_OUTLINE
+    autoCopyButton.Position = UDim2.new(0, 202, 0, 26)
     autoCopyButton.Size = UDim2.new(0, 70, 0, 20)
     autoCopyButton.TextSize = 12
     autoCopyButton.Parent = controlBar
 
+    -- Row 3: Distance slider
+    distanceLabel = Instance.new("TextLabel")
+    distanceLabel.Name = "DistanceLabel"
+    distanceLabel.FontFace = FONT_FACE
+    distanceLabel.TextColor3 = Library.FontColor
+    distanceLabel.Text = "Range: 100"
+    distanceLabel.BackgroundTransparency = 1
+    distanceLabel.Position = UDim2.new(0, 0, 0, 52)
+    distanceLabel.TextXAlignment = Enum.TextXAlignment.Left
+    distanceLabel.TextSize = 12
+    distanceLabel.Size = UDim2.new(0, 80, 0, 20)
+    distanceLabel.Parent = controlBar
+
+    local distanceSliderOuter = Instance.new("Frame")
+    distanceSliderOuter.Name = "DistanceSliderOuter"
+    distanceSliderOuter.BackgroundColor3 = Color3.new(1, 1, 1)
+    distanceSliderOuter.Position = UDim2.new(0, 84, 0, 52)
+    distanceSliderOuter.BorderColor3 = BLACK_OUTLINE
+    distanceSliderOuter.BorderSizePixel = 0
+    distanceSliderOuter.Size = UDim2.new(0, 200, 0, 18)
+    distanceSliderOuter.Parent = controlBar
+
+    local distanceSliderInner = Instance.new("Frame")
+    distanceSliderInner.Name = "SliderInner"
+    distanceSliderInner.BorderColor3 = BLACK_OUTLINE
+    distanceSliderInner.BackgroundColor3 = Library.MainColor
+    distanceSliderInner.Size = UDim2.new(1, 0, 1, 0)
+    distanceSliderInner.Parent = distanceSliderOuter
+
+    distanceSliderFill = Instance.new("Frame")
+    distanceSliderFill.Name = "SliderFill"
+    distanceSliderFill.BorderMode = Enum.BorderMode.Inset
+    distanceSliderFill.BorderColor3 = Library.AccentColorDark
+    distanceSliderFill.BackgroundColor3 = Library.AccentColor
+    distanceSliderFill.Size = UDim2.new((100 - 10) / (500 - 10), 0, 1, 0)
+    distanceSliderFill.ZIndex = 10
+    distanceSliderFill.Parent = distanceSliderOuter
+
+    -- Distance slider interaction
+    local draggingSlider = false
+    distanceSliderOuter.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            draggingSlider = true
+        end
+    end)
+
+    distanceSliderOuter.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            draggingSlider = false
+        end
+    end)
+
+    RunService.RenderStepped:Connect(function()
+        if draggingSlider and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+            local mouse = Players.LocalPlayer:GetMouse()
+            local sliderSize = distanceSliderOuter.AbsoluteSize.X
+            local mouseX = math.clamp(mouse.X - distanceSliderOuter.AbsolutePosition.X, 0, sliderSize)
+            local percentage = mouseX / sliderSize
+            local value = math.floor(10 + (percentage * (500 - 10)))
+            updateDistanceSlider(value)
+        end
+    end)
+
     -- Make draggable
     Library:MakeDraggable(outer)
 
-    -- Register colors
+    -- Register colors (keep borders black)
     Library:AddToRegistry(color, { BackgroundColor3 = "AccentColor" }, true)
     Library:AddToRegistry(titleLabel, { TextColor3 = "AccentColor" }, true)
     Library:AddToRegistry(entryCountLabel, { TextColor3 = "FontColor" }, true)
-    Library:AddToRegistry(inner, { BackgroundColor3 = "MainColor", BorderColor3 = "OutlineColor" }, true)
-    Library:AddToRegistry(headerRow, { BackgroundColor3 = "MainColor", BorderColor3 = "OutlineColor" }, true)
-    Library:AddToRegistry(scrollFrame, { BackgroundColor3 = "MainColor", BorderColor3 = "OutlineColor", ScrollBarImageColor3 = "AccentColor" }, true)
-    Library:AddToRegistry(filterTextbox, { BackgroundColor3 = "MainColor", BorderColor3 = "OutlineColor", TextColor3 = "FontColor" }, true)
-    Library:AddToRegistry(toggleLoggingButton, { BackgroundColor3 = "MainColor", BorderColor3 = "OutlineColor" }, true)
-    Library:AddToRegistry(clearButton, { BackgroundColor3 = "MainColor", BorderColor3 = "OutlineColor", TextColor3 = "FontColor" }, true)
-    Library:AddToRegistry(npcFilterButton, { BackgroundColor3 = "MainColor", BorderColor3 = "OutlineColor" }, true)
-    Library:AddToRegistry(playerFilterButton, { BackgroundColor3 = "MainColor", BorderColor3 = "OutlineColor" }, true)
-    Library:AddToRegistry(autoCopyButton, { BackgroundColor3 = "MainColor", BorderColor3 = "OutlineColor" }, true)
+    Library:AddToRegistry(inner, { BackgroundColor3 = "MainColor" }, true)
+    Library:AddToRegistry(headerRow, { BackgroundColor3 = "MainColor" }, true)
+    Library:AddToRegistry(scrollFrame, { BackgroundColor3 = "MainColor", ScrollBarImageColor3 = "AccentColor" }, true)
+    Library:AddToRegistry(filterTextbox, { BackgroundColor3 = "MainColor", TextColor3 = "FontColor" }, true)
+    Library:AddToRegistry(toggleLoggingButton, { BackgroundColor3 = "MainColor" }, true)
+    Library:AddToRegistry(clearButton, { BackgroundColor3 = "MainColor", TextColor3 = "FontColor" }, true)
+    Library:AddToRegistry(npcFilterButton, { BackgroundColor3 = "MainColor" }, true)
+    Library:AddToRegistry(playerFilterButton, { BackgroundColor3 = "MainColor" }, true)
+    Library:AddToRegistry(combatOnlyButton, { BackgroundColor3 = "MainColor" }, true)
+    Library:AddToRegistry(autoCopyButton, { BackgroundColor3 = "MainColor" }, true)
+    Library:AddToRegistry(distanceLabel, { TextColor3 = "FontColor" }, true)
+    Library:AddToRegistry(distanceSliderInner, { BackgroundColor3 = "MainColor" }, true)
+    Library:AddToRegistry(distanceSliderFill, { BackgroundColor3 = "AccentColor", BorderColor3 = "AccentColorDark" }, true)
 
     -- Connect events
     filterTextbox:GetPropertyChangedSignal("Text"):Connect(function()
@@ -636,6 +864,7 @@ function AnimationLogger.init(lib, animVis)
     clearButton.MouseButton1Click:Connect(clearLogs)
     npcFilterButton.MouseButton1Click:Connect(toggleNpcFilter)
     playerFilterButton.MouseButton1Click:Connect(togglePlayerFilter)
+    combatOnlyButton.MouseButton1Click:Connect(toggleCombatOnly)
     autoCopyButton.MouseButton1Click:Connect(toggleAutoCopy)
 
     -- Store reference in Library
