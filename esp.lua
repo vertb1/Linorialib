@@ -1,5 +1,3 @@
--- ESP Module Reconstructed from MoonSec V3 Bytecode
--- Deobfuscated using tupsutumppu/MoonsecDeobfuscator
 
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -7,7 +5,7 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
 -- Constants
-local DEFAULT_FONT = 2
+local DEFAULT_FONT = 3
 local DEFAULT_TEXT_SIZE = 13
 local DEFAULT_MAX_DISTANCE = 1000
 local DEFAULT_PROXIMITY_DISTANCE = 100
@@ -35,7 +33,7 @@ local RAD_45 = rad(45)
 
 -- Settings table (PascalCase for table)
 local Settings = {
-    enabled = true,
+    enabled = false,
     showTeam = true,
     useTeamColors = true,
     allyColor = ALLY_COLOR,
