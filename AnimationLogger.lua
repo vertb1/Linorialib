@@ -1,6 +1,5 @@
 -- Animation Logger Module (Standalone)
 -- Logs animation IDs, names, priorities, and speeds from entities in the game.
--- Based on Lycoris-Rewrite animation handling patterns
 local AnimationLogger = {}
 
 -- Services
@@ -48,7 +47,7 @@ local IMPORTANT_PATTERNS = {
 local Library = nil
 local AnimationVisualizer = nil
 
--- Track playback data (like Lycoris PlaybackData)
+-- Track playback data
 local PlaybackData = {}
 PlaybackData.__index = PlaybackData
 
@@ -102,7 +101,7 @@ local maxDistance = 100
 local distanceSliderFill = nil
 local distanceLabel = nil
 
--- Playback tracking (like Lycoris)
+-- Playback tracking
 local activePlaybacks = {} -- track -> PlaybackData
 local recordedPlaybacks = {} -- animId -> PlaybackData (completed)
 
@@ -479,7 +478,7 @@ local function addLogEntry(entityName, animId, animName, priority, isPlayer, dis
     end
 end
 
--- Handle animation played event (like Lycoris AnimatorDefender.process)
+-- Handle animation played event
 local function onAnimationPlayed(animator, track)
     if not isLogging then return end
     if not track or not track.Animation then return end
@@ -527,7 +526,7 @@ local function onAnimationPlayed(animator, track)
     -- Check if name matches important patterns
     local isImportant = isImportantAnimation(animName) or isActionPriority
 
-    -- Start tracking playback data (like Lycoris pbdata)
+    -- Start tracking playback data
     local pbdata = PlaybackData.new(track, entity)
     activePlaybacks[track] = pbdata
     
@@ -593,7 +592,7 @@ local function startLogging()
     end)
     table.insert(connections, descendantConn)
     
-    -- Watch for new descendants in Live folder specifically (like Lycoris StateListener)
+    -- Watch for new descendants in Live folder specifically
     if live then
         local liveConn = live.DescendantAdded:Connect(function(descendant)
             if descendant:IsA("Animator") then
@@ -603,7 +602,7 @@ local function startLogging()
         table.insert(connections, liveConn)
     end
     
-    -- Update loop for playback tracking (like Lycoris AnimatorDefender.update)
+    -- Update loop for playback tracking
     local updateConn = RunService.RenderStepped:Connect(function()
         for track, pbdata in pairs(activePlaybacks) do
             if not track.IsPlaying then
@@ -1004,7 +1003,7 @@ function AnimationLogger.detach()
     end
 end
 
--- Get playback data for an animation ID (like Lycoris Defense.agpd)
+-- Get playback data for an animation ID
 function AnimationLogger.getPlaybackData(animId)
     local formattedId = formatAnimationId(animId)
     return recordedPlaybacks[formattedId]
@@ -1042,7 +1041,7 @@ function AnimationLogger.exportTimingData(animId)
         name = entry.animName,
         priority = entry.priority,
         
-        -- Timing info (for defender configs like Lycoris)
+        -- Timing info for defender configs
         length = entry.length,
         speed = entry.speed,
         avgSpeed = pbdata and pbdata:getAvgSpeed() or entry.speed,
