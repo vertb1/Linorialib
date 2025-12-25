@@ -305,10 +305,12 @@ function AnimationVisualizer.init(lib)
     textLabel.TextColor3 = Library.FontColor
     textLabel.Text = "Waiting For Animation ID"
     textLabel.BackgroundTransparency = 1
-    textLabel.Position = UDim2.new(0.5, -100, 0.5, -25)
+    textLabel.Position = UDim2.new(0, 0, 0, 0)
     textLabel.TextWrapped = true
     textLabel.TextSize = 14
-    textLabel.Size = UDim2.new(0, 200, 0, 50)
+    textLabel.Size = UDim2.new(1, 0, 1, 0)
+    textLabel.TextXAlignment = Enum.TextXAlignment.Center
+    textLabel.TextYAlignment = Enum.TextYAlignment.Center
     textLabel.Parent = noViewportFrame
 
     animationTextbox = Instance.new("TextBox")
@@ -322,6 +324,9 @@ function AnimationVisualizer.init(lib)
     animationTextbox.FontFace = Font.new("rbxasset://fonts/families/RobotoMono.json")
     animationTextbox.TextSize = 14
     animationTextbox.Size = UDim2.new(1, -12, 0, 18)
+    animationTextbox.ClipsDescendants = true
+    animationTextbox.TextTruncate = Enum.TextTruncate.AtEnd
+    animationTextbox.ClearTextOnFocus = false
     animationTextbox.Parent = inner
 
     frameBackwards = Instance.new("TextButton")
@@ -454,7 +459,7 @@ function AnimationVisualizer.init(lib)
     Library.AnimationVisualizerFrame = outer
 
     -- Show intro message
-    AnimationVisualizer.message("Enter Animation ID\n\nControls:\nSpace = Play/Pause\nArrows = Frame Step\nUp/Down = Speed")
+    AnimationVisualizer.message("Enter Animation ID\nPress Enter to load")
 end
 
 function AnimationVisualizer.detach()
