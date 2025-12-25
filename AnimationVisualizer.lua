@@ -1,13 +1,89 @@
 -- Animation Visualizer Module (Standalone)
+-- Fixed version that handles character cloning issues
 local AnimationVisualizer = {}
 
 -- Services
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
+local InsertService = game:GetService("InsertService")
 
 -- Will be set when init is called
 local Library = nil
+
+-- Create a simple R6 dummy rig for animation preview
+local function createDummyRig()
+    local model = Instance.new("Model")
+    model.Name = "AnimDummy"
+    
+    local humanoid = Instance.new("Humanoid")
+    humanoid.Parent = model
+    
+    local animator = Instance.new("Animator")
+    animator.Parent = humanoid
+    
+    -- Create basic R6 parts
+    local parts = {
+        { name = "HumanoidRootPart", size = Vector3.new(2, 2, 1), pos = Vector3.new(0, 3, 0), transparency = 1 },
+        { name = "Torso", size = Vector3.new(2, 2, 1), pos = Vector3.new(0, 3, 0), color = BrickColor.new("Bright blue") },
+        { name = "Head", size = Vector3.new(1, 1, 1), pos = Vector3.new(0, 4.5, 0), color = BrickColor.new("Bright yellow") },
+        { name = "Left Arm", size = Vector3.new(1, 2, 1), pos = Vector3.new(-1.5, 3, 0), color = BrickColor.new("Bright yellow") },
+        { name = "Right Arm", size = Vector3.new(1, 2, 1), pos = Vector3.new(1.5, 3, 0), color = BrickColor.new("Bright yellow") },
+        { name = "Left Leg", size = Vector3.new(1, 2, 1), pos = Vector3.new(-0.5, 1, 0), color = BrickColor.new("Br. yellowish green") },
+        { name = "Right Leg", size = Vector3.new(1, 2, 1), pos = Vector3.new(0.5, 1, 0), color = BrickColor.new("Br. yellowish green") },
+    }
+    
+    for _, partData in ipairs(parts) do
+        local part = Instance.new("Part")
+        part.Name = partData.name
+        part.Size = partData.size
+        part.Position = partData.pos
+        part.Anchored = false
+        part.CanCollide = false
+        part.Transparency = partData.transparency or 0
+        if partData.color then
+            part.BrickColor = partData.color
+        end
+        part.Parent = model
+    end
+    
+    model.PrimaryPart = model:FindFirstChild("HumanoidRootPart")
+    return model
+end
+
+-- Try to get a usable rig for animation
+local function getAnimationRig()
+    local player = Players.LocalPlayer
+    local character = player and player.Character
+    
+    -- Method 1: Clone character with Archivable trick
+    if character then
+        local oldArchivable = character.Archivable
+        character.Archivable = true
+        
+        local success, clone = pcall(function()
+            local c = character:Clone()
+            for _, child in pairs(c:GetDescendants()) do
+                if child:IsA("Script") or child:IsA("LocalScript") or child:IsA("ModuleScript") 
+                   or child:IsA("Sound") or child:IsA("ParticleEmitter") or child:IsA("Trail")
+                   or child:IsA("Beam") or child:IsA("Fire") or child:IsA("Smoke") or child:IsA("Sparkles")
+                   or child:IsA("BillboardGui") or child:IsA("Decal") then
+                    pcall(function() child:Destroy() end)
+                end
+            end
+            return c
+        end)
+        
+        character.Archivable = oldArchivable
+        
+        if success and clone then
+            return clone
+        end
+    end
+    
+    -- Method 2: Create a dummy rig
+    return createDummyRig()
+end
 
 -- Create ScreenGui
 local ScreenGui = Instance.new("ScreenGui")
@@ -54,6 +130,11 @@ local function onIdFocusLost(enter, _)
     if not animId or animId == "" then
         return AnimationVisualizer.message("Please Enter Animation ID")
     end
+    
+    -- Format animation ID
+    if not animId:match("rbxassetid://") and not animId:match("http") then
+        animId = "rbxassetid://" .. animId
+    end
 
     -- Make sure worldModel exists
     if not worldModel then
@@ -67,28 +148,20 @@ local function onIdFocusLost(enter, _)
         end
     end)
 
-    -- Get local player character or create a dummy
-    local player = Players.LocalPlayer
-    local character = player and player.Character
+    AnimationVisualizer.message("Loading...")
 
-    if not character then
-        return AnimationVisualizer.message("No Character Found")
-    end
-
-    -- Clone character for viewport
-    local success, entity = pcall(function()
-        return character:Clone()
-    end)
-
-    if not success or not entity then
-        return AnimationVisualizer.message("Failed to Clone Character")
+    -- Get animation rig using improved method
+    local entity = getAnimationRig()
+    if not entity then
+        return AnimationVisualizer.message("Failed to Create Rig")
     end
     
-    -- Remove scripts and other non-essential items
+    -- Prepare entity for viewport
     pcall(function()
-        for _, child in pairs(entity:GetDescendants()) do
-            if child:IsA("Script") or child:IsA("LocalScript") or child:IsA("ModuleScript") then
-                child:Destroy()
+        for _, part in pairs(entity:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.Anchored = false
+                part.CanCollide = false
             end
         end
     end)
@@ -100,31 +173,30 @@ local function onIdFocusLost(enter, _)
     end)
     
     if not pivotSuccess then
-        return AnimationVisualizer.message("Failed to Setup Character")
+        return AnimationVisualizer.message("Failed to Position Rig")
     end
 
-    local primaryPart = entity.PrimaryPart or entity:FindFirstChild("HumanoidRootPart")
+    local primaryPart = entity.PrimaryPart or entity:FindFirstChild("HumanoidRootPart") or entity:FindFirstChild("Torso")
     if not primaryPart then
-        return AnimationVisualizer.message("No Primary Part Found")
+        return AnimationVisualizer.message("No Root Part Found")
     end
 
     -- Setup camera
     local _, bbs = entity:GetBoundingBox()
     camera.CFrame = CFrame.lookAt(
-        primaryPart.Position - Vector3.new(0, 0, bbs.Magnitude * 1.5),
+        primaryPart.Position - Vector3.new(0, 0, math.max(bbs.Magnitude * 1.5, 8)),
         primaryPart.Position
     )
 
     -- Find or create animator
     local humanoid = entity:FindFirstChildWhichIsA("Humanoid")
-    local animator = humanoid and humanoid:FindFirstChildWhichIsA("Animator")
+    if not humanoid then
+        humanoid = Instance.new("Humanoid", entity)
+    end
     
+    local animator = humanoid:FindFirstChildWhichIsA("Animator")
     if not animator then
-        if humanoid then
-            animator = Instance.new("Animator", humanoid)
-        else
-            return AnimationVisualizer.message("No Humanoid/Animator Found")
-        end
+        animator = Instance.new("Animator", humanoid)
     end
 
     -- Stop previous animations
@@ -141,7 +213,7 @@ local function onIdFocusLost(enter, _)
     end)
 
     if not success then
-        return AnimationVisualizer.message("Failed to Load Animation:\n" .. tostring(result))
+        return AnimationVisualizer.message("Load Failed:\n" .. tostring(result):sub(1, 40))
     end
 
     currentTrack = result
