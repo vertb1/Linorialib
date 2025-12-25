@@ -15,7 +15,7 @@ local function uDim2Import(serialized)
 
 	local SaveManager = {}
 	do
-		SaveManager.Folder = "Lycoris-Rewrite-Configs"
+		SaveManager.Folder = "dxe-configs"
 		SaveManager.Ignore = {}
 		SaveManager.Parser = {
 			Toggle = {
