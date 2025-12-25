@@ -69,17 +69,32 @@ local function onIdFocusLost(enter, _)
     end
 
     -- Clone character for viewport
-    local entity = character:Clone()
+    local success, entity = pcall(function()
+        return character:Clone()
+    end)
+
+    if not success or not entity then
+        return AnimationVisualizer.message("Failed to Clone Character")
+    end
     
     -- Remove scripts and other non-essential items
-    for _, child in pairs(entity:GetDescendants()) do
-        if child:IsA("Script") or child:IsA("LocalScript") or child:IsA("ModuleScript") then
-            child:Destroy()
+    pcall(function()
+        for _, child in pairs(entity:GetDescendants()) do
+            if child:IsA("Script") or child:IsA("LocalScript") or child:IsA("ModuleScript") then
+                child:Destroy()
+            end
         end
-    end
+    end)
 
     entity.Parent = worldModel
-    entity:PivotTo(CFrame.new(0, 0, 0))
+    
+    local pivotSuccess = pcall(function()
+        entity:PivotTo(CFrame.new(0, 0, 0))
+    end)
+    
+    if not pivotSuccess then
+        return AnimationVisualizer.message("Failed to Setup Character")
+    end
 
     local primaryPart = entity.PrimaryPart or entity:FindFirstChild("HumanoidRootPart")
     if not primaryPart then
