@@ -161,6 +161,7 @@ function entityESP.new(player)
     self._label.Text = ""
     self._label.Size = settings.textSize
     self._label.Color = Color3.fromRGB(255, 255, 255)
+    self._label.Font = 2 -- Code font
     
     -- Box
     self._box = Drawing.new("Quad")
@@ -197,7 +198,9 @@ end
 
 function entityESP:SetFont(font)
     debugLog("Setting font for player:", self._playerName, "to:", font)
-    self._label.Font = font
+    if self._label then
+        self._label.Font = font or 2
+    end
 end
 
 function entityESP:SetTextSize(size)
