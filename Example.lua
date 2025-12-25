@@ -4,7 +4,7 @@ local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/SaveManager.lua"))()
 local AnimationVisualizer = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/AnimationVisualizer.lua"))()
 local AnimationLogger = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/AnimationLogger.lua"))()
-local ESP = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/esp.lua"))()
+local ESP = loadstring(readfile("ESP_Reconstructed.lua"))()
 
 local Window = Library:CreateWindow({
     Title = 'dxe.exe',
@@ -341,6 +341,19 @@ ESPGroupBox:AddSlider('ESPTextSize', {
     Compact = false,
 })
 
+ESPGroupBox:AddDropdown('ESPFont', {
+    Text = 'Font',
+    Default = 'Code',
+    Values = {'UI', 'System', 'Code', 'Monospace'},
+    Tooltip = 'ESP text font'
+})
+
+ESPGroupBox:AddToggle('ESPTeamColors', {
+    Text = 'Use Team Colors',
+    Default = true,
+    Tooltip = 'Different colors for allies/enemies (off = use enemy color for all)'
+})
+
 ESPGroupBox:AddLabel('Ally Color'):AddColorPicker('ESPAllyColor', {
     Default = Color3.fromRGB(0, 255, 0),
     Title = 'Ally Color',
@@ -384,6 +397,15 @@ if ESP and ESP.Settings then
     
     Options.ESPTextSize:OnChanged(function()
         ESP.Settings.textSize = Options.ESPTextSize.Value
+    end)
+    
+    Options.ESPFont:OnChanged(function()
+        local fontMap = { UI = 0, System = 1, Code = 2, Monospace = 3 }
+        ESP.Settings.font = fontMap[Options.ESPFont.Value] or 2
+    end)
+    
+    Toggles.ESPTeamColors:OnChanged(function()
+        ESP.Settings.useTeamColors = Toggles.ESPTeamColors.Value
     end)
     
     Options.ESPAllyColor:OnChanged(function()
@@ -472,7 +494,6 @@ Library:OnUnload(function()
     WatermarkConnection:Disconnect()
     AnimationVisualizer.detach()
     AnimationLogger.detach()
-    EffectLogger.detach()
     Library.Unloaded = true
 end)
 
@@ -564,7 +585,6 @@ local ToolsGroup = Tabs['UI Settings']:AddLeftGroupbox('Animation Tools')
 -- Initialize tools
 AnimationVisualizer.init(Library)
 AnimationLogger.init(Library, AnimationVisualizer)
-EffectLogger.init(Library)
 
 ToolsGroup:AddToggle('AnimVisualizerToggle', {
     Text = 'Animation Visualizer',
@@ -578,22 +598,12 @@ ToolsGroup:AddToggle('AnimLoggerToggle', {
     Tooltip = 'Log animations played by entities'
 })
 
-ToolsGroup:AddToggle('EffectLoggerToggle', {
-    Text = 'Effect Logger',
-    Default = false,
-    Tooltip = 'Log effects and sounds from the game'
-})
-
 Toggles.AnimVisualizerToggle:OnChanged(function()
     AnimationVisualizer.visible(Toggles.AnimVisualizerToggle.Value)
 end)
 
 Toggles.AnimLoggerToggle:OnChanged(function()
     AnimationLogger.visible(Toggles.AnimLoggerToggle.Value)
-end)
-
-Toggles.EffectLoggerToggle:OnChanged(function()
-    EffectLogger.visible(Toggles.EffectLoggerToggle.Value)
 end)
 
 Library.ToggleKeybind = Options.MenuKeybind -- Allows you to have a custom keybind for the menu
