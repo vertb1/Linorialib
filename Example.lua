@@ -4,7 +4,7 @@ local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/SaveManager.lua"))()
 local AnimationVisualizer = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/AnimationVisualizer.lua"))()
 local AnimationLogger = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/AnimationLogger.lua"))()
-local EffectLogger = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/EffectLogger.lua"))()
+local ESP = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/esp.lua"))()
 
 local Window = Library:CreateWindow({
     Title = 'dxe.exe',
@@ -284,6 +284,117 @@ Options.KeyPicker:SetValue({ 'MB2', 'Toggle' }) -- Sets keybind to MB2, mode to 
 local LeftGroupBox2 = Tabs.Main:AddLeftGroupbox('Groupbox #2');
 LeftGroupBox2:AddLabel('Oh no...\nThis label spans multiple lines!\n\nWe\'re gonna run out of UI space...\nJust kidding! Scroll down!\n\n\nHello from below!', true)
 
+-- ESP Controls
+local ESPGroupBox = Tabs.Main:AddRightGroupbox('ESP')
+
+ESPGroupBox:AddToggle('ESPEnabled', {
+    Text = 'Enable ESP',
+    Default = true,
+    Tooltip = 'Toggle player ESP'
+})
+
+ESPGroupBox:AddToggle('ESPBoxes', {
+    Text = 'Boxes',
+    Default = true,
+    Tooltip = 'Show bounding boxes'
+})
+
+ESPGroupBox:AddToggle('ESPTracers', {
+    Text = 'Tracers',
+    Default = false,
+    Tooltip = 'Show tracer lines'
+})
+
+ESPGroupBox:AddToggle('ESPHealthBar', {
+    Text = 'Health Bar',
+    Default = true,
+    Tooltip = 'Show health bars'
+})
+
+ESPGroupBox:AddToggle('ESPShowTeam', {
+    Text = 'Show Teammates',
+    Default = true,
+    Tooltip = 'Show ESP for teammates'
+})
+
+ESPGroupBox:AddToggle('ESPProximityArrows', {
+    Text = 'Proximity Arrows',
+    Default = false,
+    Tooltip = 'Show arrows for off-screen players'
+})
+
+ESPGroupBox:AddSlider('ESPMaxDistance', {
+    Text = 'Max Distance',
+    Default = 1000,
+    Min = 100,
+    Max = 5000,
+    Rounding = 0,
+    Compact = false,
+})
+
+ESPGroupBox:AddSlider('ESPTextSize', {
+    Text = 'Text Size',
+    Default = 13,
+    Min = 8,
+    Max = 24,
+    Rounding = 0,
+    Compact = false,
+})
+
+ESPGroupBox:AddLabel('Ally Color'):AddColorPicker('ESPAllyColor', {
+    Default = Color3.fromRGB(0, 255, 0),
+    Title = 'Ally Color',
+})
+
+ESPGroupBox:AddLabel('Enemy Color'):AddColorPicker('ESPEnemyColor', {
+    Default = Color3.fromRGB(255, 0, 0),
+    Title = 'Enemy Color',
+})
+
+-- ESP Settings Callbacks
+if ESP and ESP.Settings then
+    Toggles.ESPEnabled:OnChanged(function()
+        -- Toggle all ESP visibility via enabled setting
+        ESP.Settings.enabled = Toggles.ESPEnabled.Value
+    end)
+    
+    Toggles.ESPBoxes:OnChanged(function()
+        ESP.Settings.showBoxes = Toggles.ESPBoxes.Value
+    end)
+    
+    Toggles.ESPTracers:OnChanged(function()
+        ESP.Settings.showTracers = Toggles.ESPTracers.Value
+    end)
+    
+    Toggles.ESPHealthBar:OnChanged(function()
+        ESP.Settings.showHealthBar = Toggles.ESPHealthBar.Value
+    end)
+    
+    Toggles.ESPShowTeam:OnChanged(function()
+        ESP.Settings.showTeam = Toggles.ESPShowTeam.Value
+    end)
+    
+    Toggles.ESPProximityArrows:OnChanged(function()
+        ESP.Settings.showProximityArrows = Toggles.ESPProximityArrows.Value
+    end)
+    
+    Options.ESPMaxDistance:OnChanged(function()
+        ESP.Settings.maxDistance = Options.ESPMaxDistance.Value
+    end)
+    
+    Options.ESPTextSize:OnChanged(function()
+        ESP.Settings.textSize = Options.ESPTextSize.Value
+    end)
+    
+    Options.ESPAllyColor:OnChanged(function()
+        ESP.Settings.allyColor = Options.ESPAllyColor.Value
+    end)
+    
+    Options.ESPEnemyColor:OnChanged(function()
+        ESP.Settings.enemyColor = Options.ESPEnemyColor.Value
+    end)
+end
+
 local TabBox = Tabs.Main:AddRightTabbox() -- Add Tabbox on right side
 
 -- Anything we can do in a Groupbox, we can do in a Tabbox tab (AddToggle, AddSlider, AddLabel, etc etc...)
@@ -370,7 +481,7 @@ local MenuGroup = Tabs['UI Settings']:AddLeftGroupbox('Menu')
 
 -- I set NoUI so it does not show up in the keybinds menu
 MenuGroup:AddButton('Unload', function() Library:Unload() end)
-MenuGroup:AddLabel('Menu bind'):AddKeyPicker('MenuKeybind', { Default = '', NoUI = true, Text = 'Menu keybind' })
+MenuGroup:AddLabel('Menu bind'):AddKeyPicker('MenuKeybind', { Default = 'End', NoUI = true, Text = 'Menu keybind' })
 MenuGroup:AddLabel('Watermark'):AddKeyPicker('WatermarkKeybind', { Default = '', NoUI = true, Text = 'Watermark toggle' })
 MenuGroup:AddLabel('Keybind List'):AddKeyPicker('KeybindListKeybind', { Default = '', NoUI = true, Text = 'Keybind list toggle' })
 
