@@ -1,18 +1,29 @@
-local Profiler = require("Utility/Profiler")
-local CoreGuiManager = require("Utility/CoreGuiManager")
+-- Stub for Profiler (optional dependency)
+local Profiler = {
+	wrap = function(label, f)
+		return f
+	end
+}
+
+-- Stub for CoreGuiManager (optional dependency)
+local CoreGuiManager = {
+	imark = function(inst)
+		return inst
+	end
+}
 
 local InputService = game:GetService("UserInputService")
-	local TextService = game:GetService("TextService")
-	local Teams = game:GetService("Teams")
-	local Players = game:GetService("Players")
-	local RunService = game:GetService("RunService")
-	local TweenService = game:GetService("TweenService")
-	local RenderStepped = RunService.RenderStepped
-	local LocalPlayer = Players.LocalPlayer
-	local Mouse = LocalPlayer:GetMouse()
+local TextService = game:GetService("TextService")
+local Teams = game:GetService("Teams")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local RenderStepped = RunService.RenderStepped
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
 
-	local ProtectGui = protectgui or (syn and syn.protect_gui) or function() end
-	local ScreenGui = CoreGuiManager.imark(Instance.new("ScreenGui"))
+local ProtectGui = protectgui or (syn and syn.protect_gui) or function() end
+local ScreenGui = CoreGuiManager.imark(Instance.new("ScreenGui"))
 
 	ProtectGui(ScreenGui)
 
