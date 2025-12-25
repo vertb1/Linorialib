@@ -25,11 +25,12 @@ local Mouse = LocalPlayer:GetMouse()
 local ProtectGui = protectgui or (syn and syn.protect_gui) or function() end
 local ScreenGui = CoreGuiManager.imark(Instance.new("ScreenGui"))
 
-	ProtectGui(ScreenGui)
+ProtectGui(ScreenGui)
 
-	ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+ScreenGui.Parent = gethui and gethui() or game:GetService("CoreGui")
 
-	local Toggles = {}
+local Toggles = {}
 	local Options = {}
 	local ColorPickers = {}
 	local Entries = {}
