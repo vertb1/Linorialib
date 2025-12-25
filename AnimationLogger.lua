@@ -20,6 +20,16 @@ local BLACK_OUTLINE = Color3.new(0, 0, 0)
 local MAX_HITBOX_TIME = 3.0
 local DEFAULT_HITBOX_SIZE = Vector3.new(6, 6, 8)
 
+-- Movement animation names to ALWAYS filter (even if Action priority)
+local MOVEMENT_NAMES = {
+    "front", "back", "left", "right", "forward", "backward",
+    "run", "walk", "sprint", "idle", "jump", "fall", "land",
+    "climb", "swim", "crawl", "crouch", "slide", "vault", "mantle",
+    "dodge", "roll", "dash", "locomotion", "movement",
+    "breathing", "emote", "pose", "stance", "standing", "sitting",
+    "equip", "unequip", "holster", "draw", "sheath",
+}
+
 -- Will be set when init is called
 local Library = nil
 local AnimationVisualizer = nil
@@ -106,7 +116,6 @@ local filterText = ""
 local showNpcsOnly = false
 local showPlayersOnly = false
 local autoCopy = false
-local showHitboxes = false
 local maxDistance = 100
 local distanceSliderFill = nil
 local distanceLabel = nil
@@ -121,7 +130,7 @@ local activeHitboxes = {} -- track -> Part
 -- UI References
 local outer, inner, scrollFrame, listLayout
 local filterTextbox, clearButton, toggleLoggingButton
-local npcFilterButton, playerFilterButton, autoCopyButton, hitboxToggleButton
+local npcFilterButton, playerFilterButton, autoCopyButton
 local entryCountLabel
 
 -- Animation name cache (try to find real names)
@@ -186,6 +195,18 @@ local function getRealAnimationName(track, animId)
     return name
 end
 
+-- Check if animation name matches movement patterns (should be filtered)
+local function isMovementAnimation(animName)
+    if not animName then return false end
+    local lowerName = animName:lower()
+    for _, pattern in ipairs(MOVEMENT_NAMES) do
+        if lowerName:find(pattern, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
 -- Get distance from local player to entity
 local function getDistanceToEntity(entity)
     local localPlayer = Players.LocalPlayer
@@ -215,7 +236,7 @@ end
 
 -- Hitbox visualization functions
 local function createHitboxVisualization(entity, color)
-    if not showHitboxes then return nil end
+    if not (shared.dxe and shared.dxe.showHitboxes) then return nil end
     local root = entity:FindFirstChild("HumanoidRootPart")
     if not root then return nil end
     
@@ -596,6 +617,11 @@ local function onAnimationPlayed(animator, track)
         return
     end
     
+    -- Skip movement animations by name (even if Action priority)
+    if isMovementAnimation(animName) then
+        return
+    end
+    
     -- Skip low weight (blend/transition)
     if track.WeightTarget <= 0.05 then
         return
@@ -793,19 +819,6 @@ end
 local function toggleAutoCopy()
     autoCopy = not autoCopy
     autoCopyButton.TextColor3 = autoCopy and Library.AccentColor or Library.FontColor
-end
-
--- Toggle hitbox visualization
-local function toggleHitboxes()
-    showHitboxes = not showHitboxes
-    hitboxToggleButton.TextColor3 = showHitboxes and Library.AccentColor or Library.FontColor
-    
-    -- If disabled, cleanup existing hitboxes
-    if not showHitboxes then
-        for track, _ in pairs(activeHitboxes) do
-            cleanupHitbox(track)
-        end
-    end
 end
 
 -- Update distance slider
@@ -1025,18 +1038,6 @@ function AnimationLogger.init(lib, animVis)
     autoCopyButton.TextSize = 12
     autoCopyButton.Parent = controlBar
 
-    hitboxToggleButton = Instance.new("TextButton")
-    hitboxToggleButton.Name = "HitboxToggle"
-    hitboxToggleButton.FontFace = FONT_FACE
-    hitboxToggleButton.TextColor3 = Library.FontColor
-    hitboxToggleButton.Text = "Hitboxes"
-    hitboxToggleButton.BackgroundColor3 = Library.MainColor
-    hitboxToggleButton.BorderColor3 = BLACK_OUTLINE
-    hitboxToggleButton.Position = UDim2.new(0, 187, 0, 26)
-    hitboxToggleButton.Size = UDim2.new(0, 60, 0, 20)
-    hitboxToggleButton.TextSize = 12
-    hitboxToggleButton.Parent = controlBar
-
     -- Row 3: Distance slider
     distanceLabel = Instance.new("TextLabel")
     distanceLabel.Name = "DistanceLabel"
@@ -1116,7 +1117,6 @@ function AnimationLogger.init(lib, animVis)
     Library:AddToRegistry(npcFilterButton, { BackgroundColor3 = "MainColor" }, true)
     Library:AddToRegistry(playerFilterButton, { BackgroundColor3 = "MainColor" }, true)
     Library:AddToRegistry(autoCopyButton, { BackgroundColor3 = "MainColor" }, true)
-    Library:AddToRegistry(hitboxToggleButton, { BackgroundColor3 = "MainColor" }, true)
     Library:AddToRegistry(distanceLabel, { TextColor3 = "FontColor" }, true)
     Library:AddToRegistry(distanceSliderInner, { BackgroundColor3 = "MainColor" }, true)
     Library:AddToRegistry(distanceSliderFill, { BackgroundColor3 = "AccentColor", BorderColor3 = "AccentColorDark" }, true)
@@ -1132,7 +1132,6 @@ function AnimationLogger.init(lib, animVis)
     npcFilterButton.MouseButton1Click:Connect(toggleNpcFilter)
     playerFilterButton.MouseButton1Click:Connect(togglePlayerFilter)
     autoCopyButton.MouseButton1Click:Connect(toggleAutoCopy)
-    hitboxToggleButton.MouseButton1Click:Connect(toggleHitboxes)
 
     -- Store reference in Library
     Library.AnimationLoggerFrame = outer
