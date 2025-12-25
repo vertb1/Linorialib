@@ -485,14 +485,18 @@ local function onAnimationPlayed(animator, track)
     if localPlayer and localPlayer.Character == entity then return end
 
     local entityName = entity.Name
-    local isPlayer = Players:GetPlayerFromCharacter(entity) ~= nil
+    
+    -- Check if NPC or Player using ModelCollisionGroup attribute (game-specific)
+    local collisionGroup = entity:GetAttribute("ModelCollisionGroup")
+    local isPlayer = collisionGroup == "Player" or Players:GetPlayerFromCharacter(entity) ~= nil
+    local isNpc = collisionGroup == "NPC"
     
     -- Distance check
     local distance = getDistanceToEntity(entity)
     if distance > maxDistance then return end
 
     -- Apply filters early for performance
-    if showNpcsOnly and isPlayer then return end
+    if showNpcsOnly and not isNpc then return end
     if showPlayersOnly and not isPlayer then return end
 
     local animId = track.Animation.AnimationId
@@ -560,14 +564,30 @@ local function startLogging()
 
     -- Scan workspace for existing animators
     scanForAnimators(workspace)
+    
+    -- Also scan Live folder specifically (Deepwoken spawns characters here)
+    local live = workspace:FindFirstChild("Live")
+    if live then
+        scanForAnimators(live)
+    end
 
-    -- Watch for new animators
+    -- Watch for new animators in workspace
     local descendantConn = workspace.DescendantAdded:Connect(function(descendant)
         if descendant:IsA("Animator") then
             trackAnimator(descendant)
         end
     end)
     table.insert(connections, descendantConn)
+    
+    -- Watch for new descendants in Live folder specifically (like Lycoris StateListener)
+    if live then
+        local liveConn = live.DescendantAdded:Connect(function(descendant)
+            if descendant:IsA("Animator") then
+                trackAnimator(descendant)
+            end
+        end)
+        table.insert(connections, liveConn)
+    end
     
     -- Update loop for playback tracking (like Lycoris AnimatorDefender.update)
     local updateConn = RunService.RenderStepped:Connect(function()
