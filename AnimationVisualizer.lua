@@ -55,10 +55,17 @@ local function onIdFocusLost(enter, _)
         return AnimationVisualizer.message("Please Enter Animation ID")
     end
 
-    -- Clean up previous models
-    for _, descendant in pairs(worldModel:GetChildren()) do
-        descendant:Destroy()
+    -- Make sure worldModel exists
+    if not worldModel then
+        return AnimationVisualizer.message("Visualizer Not Ready")
     end
+
+    -- Clean up previous models
+    pcall(function()
+        for _, descendant in pairs(worldModel:GetChildren()) do
+            descendant:Destroy()
+        end
+    end)
 
     -- Get local player character or create a dummy
     local player = Players.LocalPlayer
