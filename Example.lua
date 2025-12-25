@@ -2,6 +2,9 @@
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/Library.lua"))()
 local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/ThemeManager.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/SaveManager.lua"))()
+local AnimationVisualizer = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/AnimationVisualizer.lua"))()
+local AnimationLogger = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/AnimationLogger.lua"))()
+local EffectLogger = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/EffectLogger.lua"))()
 
 local Window = Library:CreateWindow({
     Title = 'dxe.exe',
@@ -356,6 +359,9 @@ Library.KeybindFrame.Visible = true; -- todo: add a function for this
 
 Library:OnUnload(function()
     WatermarkConnection:Disconnect()
+    AnimationVisualizer.detach()
+    AnimationLogger.detach()
+    EffectLogger.detach()
     Library.Unloaded = true
 end)
 
@@ -364,7 +370,120 @@ local MenuGroup = Tabs['UI Settings']:AddLeftGroupbox('Menu')
 
 -- I set NoUI so it does not show up in the keybinds menu
 MenuGroup:AddButton('Unload', function() Library:Unload() end)
-MenuGroup:AddLabel('Menu bind'):AddKeyPicker('MenuKeybind', { Default = 'End', NoUI = true, Text = 'Menu keybind' })
+MenuGroup:AddLabel('Menu bind'):AddKeyPicker('MenuKeybind', { Default = '', NoUI = true, Text = 'Menu keybind' })
+MenuGroup:AddLabel('Watermark'):AddKeyPicker('WatermarkKeybind', { Default = '', NoUI = true, Text = 'Watermark toggle' })
+MenuGroup:AddLabel('Keybind List'):AddKeyPicker('KeybindListKeybind', { Default = '', NoUI = true, Text = 'Keybind list toggle' })
+
+-- Watermark toggle keybind
+Options.WatermarkKeybind:OnClick(function()
+    Library:SetWatermarkVisibility(not Library.Watermark.Visible)
+end)
+
+-- Keybind list toggle keybind
+Options.KeybindListKeybind:OnClick(function()
+    Library.KeybindFrame.Visible = not Library.KeybindFrame.Visible
+end)
+
+-- Server Options
+local ServerGroup = Tabs['UI Settings']:AddLeftGroupbox('Server')
+
+local TeleportService = game:GetService('TeleportService')
+local HttpService = game:GetService('HttpService')
+local Players = game:GetService('Players')
+
+local function GetServers()
+    local servers = {}
+    local cursor = ""
+    local placeId = game.PlaceId
+    
+    pcall(function()
+        local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100", placeId)
+        if cursor ~= "" then
+            url = url .. "&cursor=" .. cursor
+        end
+        
+        local response = game:HttpGet(url)
+        local data = HttpService:JSONDecode(response)
+        
+        for _, server in pairs(data.data or {}) do
+            if server.playing < server.maxPlayers and server.id ~= game.JobId then
+                table.insert(servers, server)
+            end
+        end
+    end)
+    
+    return servers
+end
+
+ServerGroup:AddButton({
+    Text = 'Rejoin Server',
+    Func = function()
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId)
+    end,
+    Tooltip = 'Rejoin the current server'
+})
+
+ServerGroup:AddButton({
+    Text = 'Server Hop',
+    Func = function()
+        local servers = GetServers()
+        if #servers > 0 then
+            local randomServer = servers[math.random(1, #servers)]
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, randomServer.id)
+        end
+    end,
+    Tooltip = 'Join a random server'
+})
+
+ServerGroup:AddButton({
+    Text = 'Join Lowest Server',
+    Func = function()
+        local servers = GetServers()
+        if #servers > 0 then
+            table.sort(servers, function(a, b) return a.playing < b.playing end)
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, servers[1].id)
+        end
+    end,
+    Tooltip = 'Join the server with least players'
+})
+
+-- Animation Tools
+local ToolsGroup = Tabs['UI Settings']:AddLeftGroupbox('Animation Tools')
+
+-- Initialize tools
+AnimationVisualizer.init(Library)
+AnimationLogger.init(Library, AnimationVisualizer)
+EffectLogger.init(Library)
+
+ToolsGroup:AddToggle('AnimVisualizerToggle', {
+    Text = 'Animation Visualizer',
+    Default = false,
+    Tooltip = 'Preview animations by ID'
+})
+
+ToolsGroup:AddToggle('AnimLoggerToggle', {
+    Text = 'Animation Logger',
+    Default = false,
+    Tooltip = 'Log animations played by entities'
+})
+
+ToolsGroup:AddToggle('EffectLoggerToggle', {
+    Text = 'Effect Logger',
+    Default = false,
+    Tooltip = 'Log effects and sounds from the game'
+})
+
+Toggles.AnimVisualizerToggle:OnChanged(function()
+    AnimationVisualizer.visible(Toggles.AnimVisualizerToggle.Value)
+end)
+
+Toggles.AnimLoggerToggle:OnChanged(function()
+    AnimationLogger.visible(Toggles.AnimLoggerToggle.Value)
+end)
+
+Toggles.EffectLoggerToggle:OnChanged(function()
+    EffectLogger.visible(Toggles.EffectLoggerToggle.Value)
+end)
 
 Library.ToggleKeybind = Options.MenuKeybind -- Allows you to have a custom keybind for the menu
 
@@ -382,7 +501,7 @@ SaveManager:IgnoreThemeSettings()
 
 -- Adds our MenuKeybind to the ignore list
 -- (do you want each config to have a different menu key? probably not.)
-SaveManager:SetIgnoreIndexes({ 'MenuKeybind' })
+SaveManager:SetIgnoreIndexes({ 'MenuKeybind', 'WatermarkKeybind', 'KeybindListKeybind' })
 
 -- use case for doing it this way:
 -- a script hub could have themes in a global folder
