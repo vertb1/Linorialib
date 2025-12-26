@@ -1,3 +1,5 @@
+-- ESP Module Reconstructed from MoonSec V3 Bytecode
+-- Deobfuscated using tupsutumppu/MoonsecDeobfuscator
 
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -18,6 +20,10 @@ local ENEMY_COLOR = Color3.fromRGB(255, 0, 0)
 local WHITE_COLOR = Color3.fromRGB(255, 255, 255)
 local HEALTH_BG_COLOR = Color3.fromRGB(192, 57, 43)
 local HEALTH_FG_COLOR = Color3.fromRGB(39, 174, 96)
+local POSTURE_COLOR = Color3.fromRGB(255, 165, 0) -- Orange
+local POSTURE_BG_COLOR = Color3.fromRGB(100, 65, 0) -- Dark orange
+local LIFEFORCE_COLOR = Color3.fromRGB(139, 0, 0) -- Dark red (blood)
+local LIFEFORCE_BG_COLOR = Color3.fromRGB(60, 0, 0) -- Very dark red
 
 -- Cached functions
 local worldToViewportPoint = clonefunction(Instance.new("Camera").WorldToViewportPoint)
@@ -43,6 +49,9 @@ local Settings = {
     showTracers = false,
     unlockTracers = false,
     showHealthBar = true,
+    showPostureBar = true,
+    showLifeforceBar = true,
+    showLevel = true,
     showProximityArrows = false,
     maxProximityDistance = DEFAULT_PROXIMITY_DISTANCE,
     textSize = DEFAULT_TEXT_SIZE,
@@ -138,6 +147,34 @@ function EntityESP.new(player)
     self.line.Visible = false
     self.line.Color = WHITE_COLOR
     
+    -- Posture bar background
+    self.postureBar = Drawing.new("Quad")
+    self.postureBar.Visible = false
+    self.postureBar.Thickness = 1
+    self.postureBar.Filled = false
+    self.postureBar.Color = POSTURE_COLOR
+    
+    -- Posture bar value
+    self.postureBarValue = Drawing.new("Quad")
+    self.postureBarValue.Visible = false
+    self.postureBarValue.Thickness = 1
+    self.postureBarValue.Filled = true
+    self.postureBarValue.Color = POSTURE_COLOR
+    
+    -- Lifeforce bar background
+    self.lifeforceBar = Drawing.new("Quad")
+    self.lifeforceBar.Visible = false
+    self.lifeforceBar.Thickness = 1
+    self.lifeforceBar.Filled = false
+    self.lifeforceBar.Color = LIFEFORCE_COLOR
+    
+    -- Lifeforce bar value
+    self.lifeforceBarValue = Drawing.new("Quad")
+    self.lifeforceBarValue.Visible = false
+    self.lifeforceBarValue.Thickness = 1
+    self.lifeforceBarValue.Filled = true
+    self.lifeforceBarValue.Color = LIFEFORCE_COLOR
+    
     debugLog("ESP created for player:", player.Name)
     
     return self
@@ -199,6 +236,10 @@ function EntityESP:hide(keepTriangle)
     if self.line then self.line.Visible = false end
     if self.healthBar then self.healthBar.Visible = false end
     if self.healthBarValue then self.healthBarValue.Visible = false end
+    if self.postureBar then self.postureBar.Visible = false end
+    if self.postureBarValue then self.postureBarValue.Visible = false end
+    if self.lifeforceBar then self.lifeforceBar.Visible = false end
+    if self.lifeforceBarValue then self.lifeforceBarValue.Visible = false end
 end
 
 function EntityESP:destroy()
@@ -211,6 +252,10 @@ function EntityESP:destroy()
     self.line:Destroy()
     self.healthBar:Destroy()
     self.healthBarValue:Destroy()
+    self.postureBar:Destroy()
+    self.postureBarValue:Destroy()
+    self.lifeforceBar:Destroy()
+    self.lifeforceBarValue:Destroy()
     self.triangle:Destroy()
     
     self.label = nil
@@ -243,6 +288,35 @@ function EntityESP:update()
     local health = humanoid.Health
     local healthPercent = (health / maxHealth) * 100
     local position = rootPart.Position
+    
+    -- Get Posture values
+    local posture, maxPosture, posturePercent = 0, 100, 0
+    local postureFolder = character:FindFirstChild("Posture")
+    if postureFolder then
+        local postureValue = postureFolder:FindFirstChild("Value")
+        local maxPostureValue = postureFolder:FindFirstChild("Max")
+        if postureValue and maxPostureValue then
+            posture = postureValue.Value or 0
+            maxPosture = maxPostureValue.Value or 100
+            posturePercent = maxPosture > 0 and (posture / maxPosture) * 100 or 0
+        end
+    end
+    
+    -- Get Lifeforce values (Blood)
+    local lifeforce, maxLifeforce, lifeforcePercent = 0, 100, 0
+    local lifeforceFolder = character:FindFirstChild("Lifeforce")
+    if lifeforceFolder then
+        local lifeforceValue = lifeforceFolder:FindFirstChild("Value")
+        local maxLifeforceValue = lifeforceFolder:FindFirstChild("Max")
+        if lifeforceValue and maxLifeforceValue then
+            lifeforce = lifeforceValue.Value or 0
+            maxLifeforce = maxLifeforceValue.Value or 100
+            lifeforcePercent = maxLifeforce > 0 and (lifeforce / maxLifeforce) * 100 or 0
+        end
+    end
+    
+    -- Get Level from attributes
+    local level = character:GetAttribute("LVL") or 0
     
     local screenPos, onScreen = worldToViewportPoint(camera, position + offsetTop)
     
@@ -302,9 +376,11 @@ function EntityESP:update()
     -- Plugin data
     local plugin = self:getPlugin()
     
-    -- Label text
-    local labelText = string.format("[%s] [%d]\n[%d/%d] [%d%%]%s",
+    -- Label text with level
+    local levelText = Settings.showLevel and string.format(" [Lv.%d]", level) or ""
+    local labelText = string.format("[%s]%s [%d]\n[HP: %d/%d] [%d%%]%s",
         plugin.playerName or self.playerName,
+        levelText,
         floor(distance),
         floor(health),
         floor(maxHealth),
@@ -378,6 +454,64 @@ function EntityESP:update()
     else
         self.healthBar.Visible = false
         self.healthBarValue.Visible = false
+    end
+    
+    -- Update posture bar (to the right of character)
+    if Settings.showPostureBar and maxPosture > 0 then
+        local postureOffset = (1 - posturePercent / 100) * HEALTH_BAR_OFFSET
+        
+        -- Posture bar on the right side
+        local pbTopLeft = worldToViewportPoint(camera, position + self:convertVector(3, 3, 0))
+        local pbBottomRight = worldToViewportPoint(camera, position + self:convertVector(3.5, -4.5, 0))
+        
+        local pValueTopLeft = worldToViewportPoint(camera, position + self:convertVector(3.05, 2.95, 0) - self:convertVector(0, postureOffset, 0))
+        local pValueBottomRight = worldToViewportPoint(camera, position + self:convertVector(3.45, -4.45, 0))
+        
+        self.postureBar.Visible = true
+        self.postureBar.Color = POSTURE_COLOR
+        self.postureBar.PointA = Vector2.new(pbTopLeft.X, pbTopLeft.Y)
+        self.postureBar.PointB = Vector2.new(pbBottomRight.X, pbTopLeft.Y)
+        self.postureBar.PointC = Vector2.new(pbBottomRight.X, pbBottomRight.Y)
+        self.postureBar.PointD = Vector2.new(pbTopLeft.X, pbBottomRight.Y)
+        
+        self.postureBarValue.Visible = true
+        self.postureBarValue.Color = POSTURE_BG_COLOR:Lerp(POSTURE_COLOR, posturePercent / 100)
+        self.postureBarValue.PointA = Vector2.new(pValueTopLeft.X, pValueTopLeft.Y)
+        self.postureBarValue.PointB = Vector2.new(pValueBottomRight.X, pValueTopLeft.Y)
+        self.postureBarValue.PointC = Vector2.new(pValueBottomRight.X, pValueBottomRight.Y)
+        self.postureBarValue.PointD = Vector2.new(pValueTopLeft.X, pValueBottomRight.Y)
+    else
+        self.postureBar.Visible = false
+        self.postureBarValue.Visible = false
+    end
+    
+    -- Update lifeforce bar (further right)
+    if Settings.showLifeforceBar and maxLifeforce > 0 then
+        local lifeforceOffset = (1 - lifeforcePercent / 100) * HEALTH_BAR_OFFSET
+        
+        -- Lifeforce bar further right
+        local lfTopLeft = worldToViewportPoint(camera, position + self:convertVector(4, 3, 0))
+        local lfBottomRight = worldToViewportPoint(camera, position + self:convertVector(4.5, -4.5, 0))
+        
+        local lfValueTopLeft = worldToViewportPoint(camera, position + self:convertVector(4.05, 2.95, 0) - self:convertVector(0, lifeforceOffset, 0))
+        local lfValueBottomRight = worldToViewportPoint(camera, position + self:convertVector(4.45, -4.45, 0))
+        
+        self.lifeforceBar.Visible = true
+        self.lifeforceBar.Color = LIFEFORCE_COLOR
+        self.lifeforceBar.PointA = Vector2.new(lfTopLeft.X, lfTopLeft.Y)
+        self.lifeforceBar.PointB = Vector2.new(lfBottomRight.X, lfTopLeft.Y)
+        self.lifeforceBar.PointC = Vector2.new(lfBottomRight.X, lfBottomRight.Y)
+        self.lifeforceBar.PointD = Vector2.new(lfTopLeft.X, lfBottomRight.Y)
+        
+        self.lifeforceBarValue.Visible = true
+        self.lifeforceBarValue.Color = LIFEFORCE_BG_COLOR:Lerp(LIFEFORCE_COLOR, lifeforcePercent / 100)
+        self.lifeforceBarValue.PointA = Vector2.new(lfValueTopLeft.X, lfValueTopLeft.Y)
+        self.lifeforceBarValue.PointB = Vector2.new(lfValueBottomRight.X, lfValueTopLeft.Y)
+        self.lifeforceBarValue.PointC = Vector2.new(lfValueBottomRight.X, lfValueBottomRight.Y)
+        self.lifeforceBarValue.PointD = Vector2.new(lfValueTopLeft.X, lfValueBottomRight.Y)
+    else
+        self.lifeforceBar.Visible = false
+        self.lifeforceBarValue.Visible = false
     end
 end
 
