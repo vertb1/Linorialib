@@ -31,12 +31,15 @@ local MOVEMENT_NAMES = {
     -- Stagger animations (reactions, not attacks)
     "stagger", "stagger1", "stagger2", "stagger3", "stagger4",
     "hit", "hurt", "flinch", "knockback", "knockdown", "stunned",
+    -- Defensive animations (not attacks)
+    "block", "parry", "guard", "defend",
 }
 
--- Parry animation name patterns (local player plays these when successfully parrying)
-local PARRY_PATTERNS = {
-    "parry", "trueparry", "true_parry", "perfectparry", "perfect_parry",
-    "block", "deflect", "counter", "riposte",
+-- TRUE PARRY animation patterns (only these = successful parry)
+-- "parry" alone is an attempt, "trueparry" is a successful parry
+local TRUE_PARRY_PATTERNS = {
+    "trueparry", "true_parry", "perfectparry", "perfect_parry",
+    "successfulparry", "successful_parry",
 }
 
 -- Will be set when init is called
@@ -120,7 +123,7 @@ ScreenGui.ResetOnSpawn = false
 local logEntries = {}
 local connections = {}
 local trackedAnimators = {}
-local isLogging = false
+local isLogging = true -- Start logging by default
 local filterText = ""
 local showNpcsOnly = false
 local showPlayersOnly = false
@@ -221,11 +224,11 @@ local function isMovementAnimation(animName)
     return false
 end
 
--- Check if animation name matches parry patterns (successful parry indicator)
-local function isParryAnimation(animName)
+-- Check if animation name matches TRUE parry patterns (successful parry only)
+local function isTrueParryAnimation(animName)
     if not animName then return false end
     local lowerName = animName:lower()
-    for _, pattern in ipairs(PARRY_PATTERNS) do
+    for _, pattern in ipairs(TRUE_PARRY_PATTERNS) do
         if lowerName:find(pattern, 1, true) then
             return true
         end
@@ -233,12 +236,13 @@ local function isParryAnimation(animName)
     return false
 end
 
--- Called when local player plays a parry animation
+-- Called when local player plays a TRUE parry animation (successful parry)
 local function onLocalParry(parryAnimName)
     if not lastEnemyAttack then return end
     
     local timeSinceAttack = (os.clock() - lastEnemyAttack.startTime) * 1000 -- Convert to ms
     local enemyAnimId = lastEnemyAttack.animId
+    local enemyAnimName = lastEnemyAttack.animName or "Unknown"
     
     -- Record this parry timing
     if not parryTimings[enemyAnimId] then
@@ -254,25 +258,31 @@ local function onLocalParry(parryAnimName)
     end
     parryTimings[enemyAnimId].avgMs = sum / #parryTimings[enemyAnimId].timings
     
-    -- Update the log entry with the new parry timing
+    -- Update the log entry with the new parry timing and parried status
     for i, entry in ipairs(logEntries) do
         if entry.animId == enemyAnimId then
             entry.parryDetectedMs = math.floor(timeSinceAttack)
             entry.avgParryMs = math.floor(parryTimings[enemyAnimId].avgMs)
             entry.parryCount = #parryTimings[enemyAnimId].timings
+            entry.wasParried = true -- Mark as parried
             break
         end
     end
     
-    -- Notify
+    -- Notify with animation name
     if Library and not (shared.dxe and shared.dxe.silent) then
-        Library:Notify(string.format("Parry detected! %s @ %.0fms (avg: %.0fms, count: %d)", 
-            lastEnemyAttack.entityName, timeSinceAttack, parryTimings[enemyAnimId].avgMs, 
-            #parryTimings[enemyAnimId].timings), 3)
+        Library:Notify(string.format("✓ PARRIED: %s's [%s] @ %.0fms (avg: %.0fms x%d)", 
+            lastEnemyAttack.entityName, enemyAnimName, timeSinceAttack, 
+            parryTimings[enemyAnimId].avgMs, #parryTimings[enemyAnimId].timings), 4)
     end
     
-    print(string.format("[AnimLogger] PARRY DETECTED: %s attack '%s' parried at %.0fms", 
-        lastEnemyAttack.entityName, enemyAnimId, timeSinceAttack))
+    print(string.format("[AnimLogger] ✓ PARRIED: %s's attack [%s] (ID: %s) at %.0fms", 
+        lastEnemyAttack.entityName, enemyAnimName, enemyAnimId, timeSinceAttack))
+    
+    -- Update display to show parried status
+    if ScreenGui.Enabled then
+        updateLogDisplay()
+    end
 end
 
 -- Track local player's animator for parry detection
@@ -301,8 +311,8 @@ local function setupLocalPlayerTracking()
                 animName = getRealAnimationName(track, animId)
             end)
             
-            -- Check if this is a parry animation
-            if isParryAnimation(animName) then
+            -- Check if this is a TRUE parry animation (successful parry)
+            if isTrueParryAnimation(animName) then
                 onLocalParry(animName)
             end
         end)
@@ -423,12 +433,20 @@ local function createLogEntryRow(data)
     idLabel.ClipsDescendants = true
     idLabel.Parent = row
 
-    -- Animation name
+    -- Animation name (with parried indicator)
     local nameLabel = Instance.new("TextLabel")
     nameLabel.Name = "AnimName"
     nameLabel.FontFace = FONT_FACE
-    nameLabel.TextColor3 = data.isImportant and Color3.fromRGB(100, 255, 100) or Library.FontColor
-    nameLabel.Text = data.animName or "Unknown"
+    
+    -- If parried, show green with checkmark
+    if data.wasParried then
+        nameLabel.TextColor3 = Color3.fromRGB(100, 255, 100) -- Green = parried
+        nameLabel.Text = "✓ " .. (data.animName or "Unknown")
+    else
+        nameLabel.TextColor3 = data.isImportant and Color3.fromRGB(255, 200, 100) or Library.FontColor
+        nameLabel.Text = data.animName or "Unknown"
+    end
+    
     nameLabel.BackgroundTransparency = 1
     nameLabel.Position = UDim2.new(0, 158, 0, 0)
     nameLabel.Size = UDim2.new(0, 100, 1, 0)
@@ -1275,6 +1293,11 @@ function AnimationLogger.init(lib, animVis)
 
     -- Store reference in Library
     Library.AnimationLoggerFrame = outer
+    
+    -- Auto-start logging (on by default)
+    task.defer(function()
+        startLogging()
+    end)
 end
 
 -- Clean up
