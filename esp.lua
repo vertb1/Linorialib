@@ -289,40 +289,43 @@ function EntityESP:update()
     local healthPercent = (health / maxHealth) * 100
     local position = rootPart.Position
     
-    -- Get the Live folder for this character (workspace.Live.CharacterName)
+    -- Get the Live folder for this player (workspace.Live.PlayerName)
     local liveFolder = workspace:FindFirstChild("Live")
-    local charFolder = liveFolder and liveFolder:FindFirstChild(character.Name)
+    local charFolder = liveFolder and liveFolder:FindFirstChild(self.playerName)
     
-    -- Get Posture values from workspace.Live.CharName.Posture
-    -- Posture has direct properties: .Value (current) and .Max
+    -- Get Posture values from workspace.Live.PlayerName.Posture
+    -- Properties: .Value (current) and .MaxValue (max)
     local posture, maxPosture, posturePercent = 0, 100, 0
     if charFolder then
         local postureObj = charFolder:FindFirstChild("Posture")
         if postureObj then
             pcall(function()
                 posture = postureObj.Value or 0
-                maxPosture = postureObj.Max or 100
+                maxPosture = postureObj.MaxValue or postureObj.Max or 100
                 posturePercent = maxPosture > 0 and (posture / maxPosture) * 100 or 0
             end)
         end
     end
     
-    -- Get Lifeforce values (Blood) from workspace.Live.CharName.Lifeforce
-    -- Lifeforce has direct properties: .Value (current) and .Max
+    -- Get Lifeforce values (Blood) from workspace.Live.PlayerName.Lifeforce
+    -- Properties: .Value (current) and .MaxValue (max)
     local lifeforce, maxLifeforce, lifeforcePercent = 0, 100, 0
     if charFolder then
         local lifeforceObj = charFolder:FindFirstChild("Lifeforce")
         if lifeforceObj then
             pcall(function()
                 lifeforce = lifeforceObj.Value or 0
-                maxLifeforce = lifeforceObj.Max or 100
+                maxLifeforce = lifeforceObj.MaxValue or lifeforceObj.Max or 100
                 lifeforcePercent = maxLifeforce > 0 and (lifeforce / maxLifeforce) * 100 or 0
             end)
         end
     end
     
-    -- Get Level from character attributes or Live folder
-    local level = character:GetAttribute("LVL") or (charFolder and charFolder:GetAttribute("LVL")) or 0
+    -- Get Level from Live folder attributes (workspace.Live.PlayerName:GetAttribute("LVL"))
+    local level = 0
+    if charFolder then
+        level = charFolder:GetAttribute("LVL") or 0
+    end
     
     local screenPos, onScreen = worldToViewportPoint(camera, position + offsetTop)
     
