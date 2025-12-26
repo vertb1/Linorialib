@@ -314,6 +314,24 @@ ESPGroupBox:AddToggle('ESPHealthBar', {
     Tooltip = 'Show health bars'
 })
 
+ESPGroupBox:AddToggle('ESPPostureBar', {
+    Text = 'Posture Bar',
+    Default = true,
+    Tooltip = 'Show posture bars (orange)'
+})
+
+ESPGroupBox:AddToggle('ESPLifeforceBar', {
+    Text = 'Lifeforce Bar',
+    Default = true,
+    Tooltip = 'Show lifeforce/blood bars (red)'
+})
+
+ESPGroupBox:AddToggle('ESPShowLevel', {
+    Text = 'Show Level',
+    Default = true,
+    Tooltip = 'Show player level'
+})
+
 ESPGroupBox:AddToggle('ESPShowTeam', {
     Text = 'Show Teammates',
     Default = true,
@@ -377,6 +395,18 @@ if ESP and ESP.Settings then
     
     Toggles.ESPHealthBar:OnChanged(function()
         ESP.Settings.showHealthBar = Toggles.ESPHealthBar.Value
+    end)
+    
+    Toggles.ESPPostureBar:OnChanged(function()
+        ESP.Settings.showPostureBar = Toggles.ESPPostureBar.Value
+    end)
+    
+    Toggles.ESPLifeforceBar:OnChanged(function()
+        ESP.Settings.showLifeforceBar = Toggles.ESPLifeforceBar.Value
+    end)
+    
+    Toggles.ESPShowLevel:OnChanged(function()
+        ESP.Settings.showLevel = Toggles.ESPShowLevel.Value
     end)
     
     Toggles.ESPShowTeam:OnChanged(function()
@@ -588,6 +618,24 @@ task.defer(function()
     task.wait(0.5) -- Wait for config to load
     shared.dxe.silent = not Toggles.DebugNotifications.Value
     shared.dxe.showHitboxes = Toggles.ShowHitboxes.Value
+    
+    -- Apply ESP settings from loaded config
+    if ESP and ESP.Settings then
+        ESP.Settings.enabled = Toggles.ESPEnabled.Value
+        ESP.Settings.showBoxes = Toggles.ESPBoxes.Value
+        ESP.Settings.showTracers = Toggles.ESPTracers.Value
+        ESP.Settings.showHealthBar = Toggles.ESPHealthBar.Value
+        ESP.Settings.showPostureBar = Toggles.ESPPostureBar.Value
+        ESP.Settings.showLifeforceBar = Toggles.ESPLifeforceBar.Value
+        ESP.Settings.showLevel = Toggles.ESPShowLevel.Value
+        ESP.Settings.showTeam = Toggles.ESPShowTeam.Value
+        ESP.Settings.showProximityArrows = Toggles.ESPProximityArrows.Value
+        ESP.Settings.maxDistance = Options.ESPMaxDistance.Value
+        ESP.Settings.textSize = Options.ESPTextSize.Value
+        ESP.Settings.useTeamColors = Toggles.ESPTeamColors.Value
+        ESP.Settings.allyColor = Options.ESPAllyColor.Value
+        ESP.Settings.enemyColor = Options.ESPEnemyColor.Value
+    end
 end)
 
 Library.ToggleKeybind = Options.MenuKeybind -- Allows you to have a custom keybind for the menu
