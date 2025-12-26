@@ -617,6 +617,17 @@ LoggerGroupBox:AddToggle('AnimLoggerPlayersOnly', {
     Default = false,
 })
 
+LoggerGroupBox:AddButton({
+    Text = 'Clear Saved Timings',
+    Func = function()
+        if AnimationLogger and AnimationLogger.clearTimings then
+            AnimationLogger.clearTimings()
+            Library:Notify("Cleared all saved parry timings", 2)
+        end
+    end,
+    Tooltip = 'Clear all learned parry timings from memory and file',
+})
+
 -- Animation Logger Callbacks
 if AnimationLogger then
     Toggles.AnimLoggerVisible:OnChanged(function()
