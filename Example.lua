@@ -490,10 +490,16 @@ DefenseGroupBox:AddToggle('AutoDefenseUseDetected', {
     Tooltip = 'Use parry timings learned from AnimationLogger'
 })
 
+DefenseGroupBox:AddToggle('AutoDefenseOnlyWhitelisted', {
+    Text = 'Only Whitelisted Anims',
+    Default = true,
+    Tooltip = 'Only parry animations with known/learned timings (recommended)'
+})
+
 DefenseGroupBox:AddToggle('AutoDefenseDebug', {
     Text = 'Debug Mode',
     Default = false,
-    Tooltip = 'Show debug info in console'
+    Tooltip = 'Show debug notifications when parrying'
 })
 
 DefenseGroupBox:AddButton({
@@ -568,6 +574,10 @@ if AutoDefense then
         AutoDefense.Settings.useDetectedTimings = Toggles.AutoDefenseUseDetected.Value
     end)
     
+    Toggles.AutoDefenseOnlyWhitelisted:OnChanged(function()
+        AutoDefense.Settings.onlyWhitelisted = Toggles.AutoDefenseOnlyWhitelisted.Value
+    end)
+    
     Toggles.AutoDefenseDebug:OnChanged(function()
         AutoDefense.debugMode = Toggles.AutoDefenseDebug.Value
     end)
@@ -582,84 +592,6 @@ if AutoDefense then
     
     Options.AutoDefenseMaxMs:OnChanged(function()
         AutoDefense.Settings.maxParryMs = Options.AutoDefenseMaxMs.Value
-    end)
-end
-
--- Animation Logger Controls on Combat tab
-local LoggerGroupBox = Tabs.Combat:AddRightGroupbox('Animation Logger')
-
-LoggerGroupBox:AddToggle('AnimLoggerVisible', {
-    Text = 'Show Logger Window',
-    Default = false,
-    Tooltip = 'Show the animation logger window'
-}):AddKeyPicker('AnimLoggerKeybind', {
-    Default = 'L',
-    Mode = 'Toggle',
-    Text = 'Animation Logger',
-    NoUI = true
-})
-
-LoggerGroupBox:AddSlider('AnimLoggerDistance', {
-    Text = 'Log Distance',
-    Default = 100,
-    Min = 10,
-    Max = 500,
-    Rounding = 0,
-})
-
-LoggerGroupBox:AddToggle('AnimLoggerNPCsOnly', {
-    Text = 'NPCs Only',
-    Default = false,
-})
-
-LoggerGroupBox:AddToggle('AnimLoggerPlayersOnly', {
-    Text = 'Players Only',
-    Default = false,
-})
-
-LoggerGroupBox:AddButton({
-    Text = 'Clear Saved Timings',
-    Func = function()
-        if AnimationLogger and AnimationLogger.clearTimings then
-            AnimationLogger.clearTimings()
-            Library:Notify("Cleared all saved parry timings", 2)
-        end
-    end,
-    Tooltip = 'Clear all learned parry timings from memory and file',
-})
-
--- Animation Logger Callbacks
-if AnimationLogger then
-    Toggles.AnimLoggerVisible:OnChanged(function()
-        if AnimationLogger.setVisible then
-            AnimationLogger.setVisible(Toggles.AnimLoggerVisible.Value)
-        end
-    end)
-    
-    Options.AnimLoggerDistance:OnChanged(function()
-        if AnimationLogger.setMaxDistance then
-            AnimationLogger.setMaxDistance(Options.AnimLoggerDistance.Value)
-        end
-    end)
-    
-    Toggles.AnimLoggerNPCsOnly:OnChanged(function()
-        if AnimationLogger.setFilter then
-            if Toggles.AnimLoggerNPCsOnly.Value then
-                AnimationLogger.setFilter("npc")
-            elseif not Toggles.AnimLoggerPlayersOnly.Value then
-                AnimationLogger.setFilter("all")
-            end
-        end
-    end)
-    
-    Toggles.AnimLoggerPlayersOnly:OnChanged(function()
-        if AnimationLogger.setFilter then
-            if Toggles.AnimLoggerPlayersOnly.Value then
-                AnimationLogger.setFilter("player")
-            elseif not Toggles.AnimLoggerNPCsOnly.Value then
-                AnimationLogger.setFilter("all")
-            end
-        end
     end)
 end
 
@@ -869,6 +801,7 @@ task.defer(function()
         AutoDefense.Settings.blockDuration = Options.AutoDefenseBlockDuration.Value / 1000
         AutoDefense.Settings.onlyTargeted = Toggles.AutoDefenseOnlyTargeted.Value
         AutoDefense.Settings.useDetectedTimings = Toggles.AutoDefenseUseDetected.Value
+        AutoDefense.Settings.onlyWhitelisted = Toggles.AutoDefenseOnlyWhitelisted.Value
         AutoDefense.debugMode = Toggles.AutoDefenseDebug.Value
         AutoDefense.Settings.fallbackParryPercent = Options.AutoDefenseFallbackPercent.Value / 100
         AutoDefense.Settings.minParryMs = Options.AutoDefenseMinMs.Value
