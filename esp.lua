@@ -289,34 +289,42 @@ function EntityESP:update()
     local healthPercent = (health / maxHealth) * 100
     local position = rootPart.Position
     
-    -- Get Posture values
+    -- Get the Live folder for this character (workspace.Live.CharacterName)
+    local liveFolder = workspace:FindFirstChild("Live")
+    local charFolder = liveFolder and liveFolder:FindFirstChild(character.Name)
+    
+    -- Get Posture values from workspace.Live.CharName.Posture
     local posture, maxPosture, posturePercent = 0, 100, 0
-    local postureFolder = character:FindFirstChild("Posture")
-    if postureFolder then
-        local postureValue = postureFolder:FindFirstChild("Value")
-        local maxPostureValue = postureFolder:FindFirstChild("Max")
-        if postureValue and maxPostureValue then
-            posture = postureValue.Value or 0
-            maxPosture = maxPostureValue.Value or 100
-            posturePercent = maxPosture > 0 and (posture / maxPosture) * 100 or 0
+    if charFolder then
+        local postureFolder = charFolder:FindFirstChild("Posture")
+        if postureFolder then
+            local postureValue = postureFolder:FindFirstChild("Value")
+            local maxPostureValue = postureFolder:FindFirstChild("Max")
+            if postureValue and maxPostureValue then
+                posture = postureValue.Value or 0
+                maxPosture = maxPostureValue.Value or 100
+                posturePercent = maxPosture > 0 and (posture / maxPosture) * 100 or 0
+            end
         end
     end
     
-    -- Get Lifeforce values (Blood)
+    -- Get Lifeforce values (Blood) from workspace.Live.CharName.Lifeforce
     local lifeforce, maxLifeforce, lifeforcePercent = 0, 100, 0
-    local lifeforceFolder = character:FindFirstChild("Lifeforce")
-    if lifeforceFolder then
-        local lifeforceValue = lifeforceFolder:FindFirstChild("Value")
-        local maxLifeforceValue = lifeforceFolder:FindFirstChild("Max")
-        if lifeforceValue and maxLifeforceValue then
-            lifeforce = lifeforceValue.Value or 0
-            maxLifeforce = maxLifeforceValue.Value or 100
-            lifeforcePercent = maxLifeforce > 0 and (lifeforce / maxLifeforce) * 100 or 0
+    if charFolder then
+        local lifeforceFolder = charFolder:FindFirstChild("Lifeforce")
+        if lifeforceFolder then
+            local lifeforceValue = lifeforceFolder:FindFirstChild("Value")
+            local maxLifeforceValue = lifeforceFolder:FindFirstChild("Max")
+            if lifeforceValue and maxLifeforceValue then
+                lifeforce = lifeforceValue.Value or 0
+                maxLifeforce = maxLifeforceValue.Value or 100
+                lifeforcePercent = maxLifeforce > 0 and (lifeforce / maxLifeforce) * 100 or 0
+            end
         end
     end
     
-    -- Get Level from attributes
-    local level = character:GetAttribute("LVL") or 0
+    -- Get Level from character attributes or Live folder
+    local level = character:GetAttribute("LVL") or (charFolder and charFolder:GetAttribute("LVL")) or 0
     
     local screenPos, onScreen = worldToViewportPoint(camera, position + offsetTop)
     
