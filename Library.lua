@@ -3571,35 +3571,46 @@ local Toggles = {}
 		local lastFpsTime = os.clock()
 		local currentFps = 60
 		
-		table.insert(Library.Signals, RunService.RenderStepped:Connect(function()
-			frameCount = frameCount + 1
-			local now = os.clock()
-			
-			-- Update FPS every 0.5 seconds
-			if now - lastFpsTime >= 0.5 then
-				currentFps = frameCount / (now - lastFpsTime)
-				frameCount = 0
-				lastFpsTime = now
-			end
-			
-			-- Update watermark every 0.1 seconds
-			if now - lastUpdate < 0.1 then return end
-			lastUpdate = now
-			
-			if Library.Watermark and Library.Watermark.Visible then
-				local ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
-				local fps = currentFps
-				local cpu = Stats:GetTotalMemoryUsageMb()
-				local gpu = 0
+		task.spawn(function()
+			while true do
+				task.wait(0.1)
 				
-				pcall(function()
-					gpu = Stats.Network.ServerStatsItem["Data Receive"]:GetValue() / 1000
-				end)
+				frameCount = frameCount + 1
+				local now = os.clock()
 				
-				local text = string.format("dxe | %.0fms | %.0f fps | %.0f MB", ping, fps, cpu)
-				Library:SetWatermark(text)
+				-- Update FPS
+				if now - lastFpsTime >= 0.5 then
+					currentFps = frameCount / (now - lastFpsTime)
+					frameCount = 0
+					lastFpsTime = now
+				end
+				
+				if Library.Watermark and Library.Watermark.Visible then
+					local ping = 0
+					local cpu = 0
+					local dataRecv = 0
+					
+					pcall(function()
+						ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+					end)
+					
+					pcall(function()
+						cpu = Stats:GetTotalMemoryUsageMb()
+					end)
+					
+					pcall(function()
+						dataRecv = Stats.Network.ServerStatsItem["Data Receive"]:GetValue()
+					end)
+					
+					local fps = math.floor(currentFps)
+					local text = string.format("dxe | %dms | %d fps | %.0f MB | %.1f kb/s", ping, fps, cpu, dataRecv / 1000)
+					
+					pcall(function()
+						Library:SetWatermark(text)
+					end)
+				end
 			end
-		end))
+		end)
 	end
 
 	function Library:ManuallyManagedNotify(Text)
