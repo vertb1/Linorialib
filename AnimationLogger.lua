@@ -28,6 +28,9 @@ local MOVEMENT_NAMES = {
     "dodge", "roll", "dash", "locomotion", "movement",
     "breathing", "emote", "pose", "stance", "standing", "sitting",
     "equip", "unequip", "holster", "draw", "sheath",
+    -- Stagger animations (reactions, not attacks)
+    "stagger", "stagger1", "stagger2", "stagger3", "stagger4",
+    "hit", "hurt", "flinch", "knockback", "knockdown", "stunned",
 }
 
 -- Parry animation name patterns (local player plays these when successfully parrying)
