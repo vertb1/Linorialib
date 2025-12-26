@@ -1396,5 +1396,46 @@ function AnimationLogger.getParryTimings()
     return parryTimings
 end
 
+-- Set visibility of the logger window
+function AnimationLogger.setVisible(visible)
+    if ScreenGui then
+        ScreenGui.Enabled = visible
+    end
+end
+
+-- Set max distance for logging
+function AnimationLogger.setMaxDistance(distance)
+    maxDistance = distance or 100
+    if distanceLabel then
+        distanceLabel.Text = string.format("Dist: %d", maxDistance)
+    end
+    if distanceSliderFill then
+        local percentage = (maxDistance - 10) / (500 - 10)
+        distanceSliderFill.Size = UDim2.new(percentage, 0, 1, 0)
+    end
+end
+
+-- Set filter mode ("all", "npc", "player")
+function AnimationLogger.setFilter(mode)
+    if mode == "npc" then
+        showNpcsOnly = true
+        showPlayersOnly = false
+    elseif mode == "player" then
+        showNpcsOnly = false
+        showPlayersOnly = true
+    else
+        showNpcsOnly = false
+        showPlayersOnly = false
+    end
+    
+    -- Update UI buttons if they exist
+    if npcFilterButton then
+        npcFilterButton.TextColor3 = showNpcsOnly and Color3.fromRGB(100, 255, 100) or Library.FontColor
+    end
+    if playerFilterButton then
+        playerFilterButton.TextColor3 = showPlayersOnly and Color3.fromRGB(100, 255, 100) or Library.FontColor
+    end
+end
+
 -- Return module
 return AnimationLogger
