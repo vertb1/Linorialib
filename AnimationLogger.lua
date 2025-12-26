@@ -243,6 +243,69 @@ local function isTrueParryAnimation(animName)
     return false
 end
 
+-- Filesystem functions for saving/loading parry timings
+local EXPORT_FOLDER = "dxe/timings"
+
+local function ensureFolder()
+    if not isfolder then return false end
+    if not isfolder(EXPORT_FOLDER) then
+        pcall(function()
+            makefolder("dxe")
+            makefolder(EXPORT_FOLDER)
+        end)
+    end
+    return isfolder(EXPORT_FOLDER)
+end
+
+local function saveParryTimings()
+    if not writefile or not ensureFolder() then return false end
+    
+    local data = {}
+    for animId, timing in pairs(parryTimings) do
+        data[animId] = {
+            avgMs = timing.avgMs,
+            count = #timing.timings,
+            timings = timing.timings,
+        }
+    end
+    
+    local success = pcall(function()
+        local json = game:GetService("HttpService"):JSONEncode(data)
+        writefile(EXPORT_FOLDER .. "/parry_timings.json", json)
+    end)
+    
+    if success then
+        print("[AnimLogger] Saved parry timings to", EXPORT_FOLDER .. "/parry_timings.json")
+    end
+    
+    return success
+end
+
+local function loadParryTimings()
+    if not readfile or not isfile then return false end
+    
+    local filePath = EXPORT_FOLDER .. "/parry_timings.json"
+    if not isfile(filePath) then return false end
+    
+    local success = pcall(function()
+        local json = readfile(filePath)
+        local data = game:GetService("HttpService"):JSONDecode(json)
+        
+        for animId, timing in pairs(data) do
+            parryTimings[animId] = {
+                avgMs = timing.avgMs or 0,
+                timings = timing.timings or {},
+            }
+        end
+    end)
+    
+    if success then
+        print("[AnimLogger] Loaded parry timings from", filePath)
+    end
+    
+    return success
+end
+
 -- Called when local player plays a TRUE parry animation (successful parry)
 local function onLocalParry(parryAnimName)
     if not lastEnemyAttack then return end
@@ -275,6 +338,9 @@ local function onLocalParry(parryAnimName)
             break
         end
     end
+    
+    -- Auto-save parry timings to file
+    saveParryTimings()
     
     -- Notify with animation name
     if Library and not (shared.dxe and shared.dxe.silent) then
@@ -1301,6 +1367,17 @@ function AnimationLogger.init(lib, animVis)
     -- Store reference in Library
     Library.AnimationLoggerFrame = outer
     
+    -- Load saved parry timings from file
+    task.defer(function()
+        if loadParryTimings() then
+            local count = 0
+            for _ in pairs(parryTimings) do count = count + 1 end
+            if count > 0 then
+                Library:Notify(string.format("Loaded %d parry timing(s) from file", count), 3)
+            end
+        end
+    end)
+    
     -- Auto-start logging (on by default)
     task.defer(function()
         startLogging()
@@ -1394,6 +1471,32 @@ end
 -- Get all detected parry timings
 function AnimationLogger.getParryTimings()
     return parryTimings
+end
+
+-- Save parry timings to file
+function AnimationLogger.saveTimings()
+    return saveParryTimings()
+end
+
+-- Load parry timings from file
+function AnimationLogger.loadTimings()
+    return loadParryTimings()
+end
+
+-- Get export folder path
+function AnimationLogger.getExportPath()
+    return EXPORT_FOLDER
+end
+
+-- Clear all parry timings (memory + file)
+function AnimationLogger.clearTimings()
+    parryTimings = {}
+    if writefile and ensureFolder() then
+        pcall(function()
+            writefile(EXPORT_FOLDER .. "/parry_timings.json", "{}")
+        end)
+    end
+    print("[AnimLogger] Cleared all parry timings")
 end
 
 -- Set visibility of the logger window
