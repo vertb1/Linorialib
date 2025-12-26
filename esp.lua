@@ -294,32 +294,30 @@ function EntityESP:update()
     local charFolder = liveFolder and liveFolder:FindFirstChild(character.Name)
     
     -- Get Posture values from workspace.Live.CharName.Posture
+    -- Posture has direct properties: .Value (current) and .Max
     local posture, maxPosture, posturePercent = 0, 100, 0
     if charFolder then
-        local postureFolder = charFolder:FindFirstChild("Posture")
-        if postureFolder then
-            local postureValue = postureFolder:FindFirstChild("Value")
-            local maxPostureValue = postureFolder:FindFirstChild("Max")
-            if postureValue and maxPostureValue then
-                posture = postureValue.Value or 0
-                maxPosture = maxPostureValue.Value or 100
+        local postureObj = charFolder:FindFirstChild("Posture")
+        if postureObj then
+            pcall(function()
+                posture = postureObj.Value or 0
+                maxPosture = postureObj.Max or 100
                 posturePercent = maxPosture > 0 and (posture / maxPosture) * 100 or 0
-            end
+            end)
         end
     end
     
     -- Get Lifeforce values (Blood) from workspace.Live.CharName.Lifeforce
+    -- Lifeforce has direct properties: .Value (current) and .Max
     local lifeforce, maxLifeforce, lifeforcePercent = 0, 100, 0
     if charFolder then
-        local lifeforceFolder = charFolder:FindFirstChild("Lifeforce")
-        if lifeforceFolder then
-            local lifeforceValue = lifeforceFolder:FindFirstChild("Value")
-            local maxLifeforceValue = lifeforceFolder:FindFirstChild("Max")
-            if lifeforceValue and maxLifeforceValue then
-                lifeforce = lifeforceValue.Value or 0
-                maxLifeforce = maxLifeforceValue.Value or 100
+        local lifeforceObj = charFolder:FindFirstChild("Lifeforce")
+        if lifeforceObj then
+            pcall(function()
+                lifeforce = lifeforceObj.Value or 0
+                maxLifeforce = lifeforceObj.Max or 100
                 lifeforcePercent = maxLifeforce > 0 and (lifeforce / maxLifeforce) * 100 or 0
-            end
+            end)
         end
     end
     
