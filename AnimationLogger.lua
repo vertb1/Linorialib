@@ -30,6 +30,12 @@ local MOVEMENT_NAMES = {
     "equip", "unequip", "holster", "draw", "sheath",
 }
 
+-- Parry animation name patterns (local player plays these when successfully parrying)
+local PARRY_PATTERNS = {
+    "parry", "trueparry", "true_parry", "perfectparry", "perfect_parry",
+    "block", "deflect", "counter", "riposte",
+}
+
 -- Will be set when init is called
 local Library = nil
 local AnimationVisualizer = nil
@@ -124,6 +130,11 @@ local distanceLabel = nil
 local activePlaybacks = {} -- track -> PlaybackData
 local recordedPlaybacks = {} -- animId -> PlaybackData (completed)
 
+-- Parry detection
+local lastEnemyAttack = nil -- { animId, entityName, startTime, track }
+local parryTimings = {} -- animId -> { parryTimeMs, count }
+local localPlayerAnimator = nil
+
 -- Hitbox visualization
 local activeHitboxes = {} -- track -> Part
 
@@ -205,6 +216,105 @@ local function isMovementAnimation(animName)
         end
     end
     return false
+end
+
+-- Check if animation name matches parry patterns (successful parry indicator)
+local function isParryAnimation(animName)
+    if not animName then return false end
+    local lowerName = animName:lower()
+    for _, pattern in ipairs(PARRY_PATTERNS) do
+        if lowerName:find(pattern, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Called when local player plays a parry animation
+local function onLocalParry(parryAnimName)
+    if not lastEnemyAttack then return end
+    
+    local timeSinceAttack = (os.clock() - lastEnemyAttack.startTime) * 1000 -- Convert to ms
+    local enemyAnimId = lastEnemyAttack.animId
+    
+    -- Record this parry timing
+    if not parryTimings[enemyAnimId] then
+        parryTimings[enemyAnimId] = { timings = {}, avgMs = 0 }
+    end
+    
+    table.insert(parryTimings[enemyAnimId].timings, timeSinceAttack)
+    
+    -- Calculate average
+    local sum = 0
+    for _, t in ipairs(parryTimings[enemyAnimId].timings) do
+        sum = sum + t
+    end
+    parryTimings[enemyAnimId].avgMs = sum / #parryTimings[enemyAnimId].timings
+    
+    -- Update the log entry with the new parry timing
+    for i, entry in ipairs(logEntries) do
+        if entry.animId == enemyAnimId then
+            entry.parryDetectedMs = math.floor(timeSinceAttack)
+            entry.avgParryMs = math.floor(parryTimings[enemyAnimId].avgMs)
+            entry.parryCount = #parryTimings[enemyAnimId].timings
+            break
+        end
+    end
+    
+    -- Notify
+    if Library and not (shared.dxe and shared.dxe.silent) then
+        Library:Notify(string.format("Parry detected! %s @ %.0fms (avg: %.0fms, count: %d)", 
+            lastEnemyAttack.entityName, timeSinceAttack, parryTimings[enemyAnimId].avgMs, 
+            #parryTimings[enemyAnimId].timings), 3)
+    end
+    
+    print(string.format("[AnimLogger] PARRY DETECTED: %s attack '%s' parried at %.0fms", 
+        lastEnemyAttack.entityName, enemyAnimId, timeSinceAttack))
+end
+
+-- Track local player's animator for parry detection
+local function setupLocalPlayerTracking()
+    local localPlayer = Players.LocalPlayer
+    if not localPlayer then return end
+    
+    local function onCharacterAdded(character)
+        local humanoid = character:WaitForChild("Humanoid", 5)
+        if not humanoid then return end
+        
+        local animator = humanoid:WaitForChild("Animator", 5)
+        if not animator then return end
+        
+        localPlayerAnimator = animator
+        
+        local conn = animator.AnimationPlayed:Connect(function(track)
+            if not isLogging then return end
+            if not track or not track.Animation then return end
+            
+            local animName = track.Animation.Name
+            local animId = track.Animation.AnimationId
+            
+            -- Try to get real name
+            pcall(function()
+                animName = getRealAnimationName(track, animId)
+            end)
+            
+            -- Check if this is a parry animation
+            if isParryAnimation(animName) then
+                onLocalParry(animName)
+            end
+        end)
+        
+        table.insert(connections, conn)
+    end
+    
+    if localPlayer.Character then
+        task.spawn(function()
+            onCharacterAdded(localPlayer.Character)
+        end)
+    end
+    
+    local charConn = localPlayer.CharacterAdded:Connect(onCharacterAdded)
+    table.insert(connections, charConn)
 end
 
 -- Get distance from local player to entity
@@ -367,12 +477,23 @@ local function createLogEntryRow(data)
     lengthLabel.ClipsDescendants = true
     lengthLabel.Parent = row
 
-    -- Parry Time (suggested timing in ms) - YELLOW for visibility
+    -- Parry Time (suggested timing in ms) - shows detected timing if available
     local parryLabel = Instance.new("TextLabel")
     parryLabel.Name = "ParryTime"
     parryLabel.FontFace = FONT_FACE
-    parryLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
-    parryLabel.Text = data.suggestedParryMs and string.format("%dms", data.suggestedParryMs) or "---"
+    
+    -- If we have detected parry timing, show it in green, otherwise show suggested in yellow
+    if data.avgParryMs and data.parryCount and data.parryCount > 0 then
+        parryLabel.TextColor3 = Color3.fromRGB(100, 255, 100) -- Green = confirmed timing
+        parryLabel.Text = string.format("%dms(%d)", data.avgParryMs, data.parryCount)
+    elseif data.suggestedParryMs then
+        parryLabel.TextColor3 = Color3.fromRGB(255, 255, 100) -- Yellow = suggested
+        parryLabel.Text = string.format("%dms", data.suggestedParryMs)
+    else
+        parryLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+        parryLabel.Text = "---"
+    end
+    
     parryLabel.BackgroundTransparency = 1
     parryLabel.Position = UDim2.new(0, 370, 0, 0)
     parryLabel.Size = UDim2.new(0, 42, 1, 0)
@@ -663,6 +784,19 @@ local function onAnimationPlayed(animator, track)
     -- Calculate suggested parry timing
     -- Most attacks hit around 40-60% of animation, suggest 50% adjusted for speed
     local suggestedParryMs = math.floor((length * 0.5 / speed) * 1000)
+    
+    local formattedId = formatAnimationId(animId)
+    
+    -- Track this as the last enemy attack for parry detection correlation
+    lastEnemyAttack = {
+        animId = formattedId,
+        animName = animName,
+        entityName = entityName,
+        startTime = os.clock(),
+        track = track,
+        length = length,
+        speed = speed,
+    }
 
     addLogEntry(entityName, animId, animName, priority, isPlayer, distance, isImportant, speed, length, suggestedParryMs)
 end
@@ -693,6 +827,9 @@ local function startLogging()
     isLogging = true
     toggleLoggingButton.Text = "Stop Logging"
     toggleLoggingButton.TextColor3 = Color3.fromRGB(255, 100, 100)
+    
+    -- Setup local player parry detection
+    setupLocalPlayerTracking()
 
     -- Scan workspace for existing animators
     scanForAnimators(workspace)
@@ -1174,6 +1311,7 @@ end
 function AnimationLogger.exportTimingData(animId)
     local formattedId = formatAnimationId(animId)
     local pbdata = recordedPlaybacks[formattedId]
+    local parryData = parryTimings[formattedId]
     
     -- Find the log entry for this animation
     local entry = nil
@@ -1189,6 +1327,10 @@ function AnimationLogger.exportTimingData(animId)
     local avgSpeed = pbdata and pbdata:getAvgSpeed() or entry.speed
     local suggestedParryMs = entry.suggestedParryMs or math.floor((entry.length * 0.5 / avgSpeed) * 1000)
     
+    -- Use detected parry timing if available
+    local detectedParryMs = parryData and parryData.avgMs or nil
+    local parryCount = parryData and #parryData.timings or 0
+    
     return {
         -- Animation info
         animId = "rbxassetid://" .. formattedId,
@@ -1202,6 +1344,10 @@ function AnimationLogger.exportTimingData(animId)
         duration = pbdata and pbdata:getDuration() or entry.length,
         suggestedParryMs = suggestedParryMs,
         
+        -- Detected parry timing (from actual gameplay)
+        detectedParryMs = detectedParryMs,
+        parryCount = parryCount,
+        
         -- Speed history (if available)
         speedHistory = pbdata and pbdata.ash or {},
         
@@ -1210,6 +1356,11 @@ function AnimationLogger.exportTimingData(animId)
         isPlayer = entry.isPlayer,
         isImportant = entry.isImportant,
     }
+end
+
+-- Get all detected parry timings
+function AnimationLogger.getParryTimings()
+    return parryTimings
 end
 
 -- Return module
