@@ -116,9 +116,11 @@ local function getParryTiming(animId, animLength, animSpeed)
     local formattedId = formatAnimationId(animId)
     
     -- First check detected timings from AnimationLogger
-    if AutoDefense.Settings.useDetectedTimings and AnimationLogger then
-        local loggerTimings = AnimationLogger.getParryTimings and AnimationLogger.getParryTimings()
-        if loggerTimings and loggerTimings[formattedId] then
+    if AutoDefense.Settings.useDetectedTimings and AnimationLogger and type(AnimationLogger.getParryTimings) == "function" then
+        local success, loggerTimings = pcall(function()
+            return AnimationLogger.getParryTimings()
+        end)
+        if success and loggerTimings and loggerTimings[formattedId] then
             local avgMs = loggerTimings[formattedId].avgMs
             if avgMs and avgMs > 0 then
                 debugLog("Using detected timing for", formattedId, ":", avgMs, "ms")
@@ -472,8 +474,16 @@ function AutoDefense.importTimings()
         return
     end
     
-    local loggerTimings = AnimationLogger.getParryTimings and AnimationLogger.getParryTimings()
-    if not loggerTimings then
+    if type(AnimationLogger.getParryTimings) ~= "function" then
+        notify("AnimationLogger.getParryTimings not available (update AnimationLogger)", 3)
+        return
+    end
+    
+    local success, loggerTimings = pcall(function()
+        return AnimationLogger.getParryTimings()
+    end)
+    
+    if not success or not loggerTimings then
         notify("No timings to import", 2)
         return
     end
