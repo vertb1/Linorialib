@@ -441,48 +441,12 @@ SubDepbox:SetupDependencies({
 });
 
 -- Library functions
--- Sets the watermark visibility
+-- Sets the watermark visibility (debug info updates automatically in Library)
 Library:SetWatermarkVisibility(true)
-
--- Watermark with useful info
-local FrameTimer = tick()
-local FrameCounter = 0
-local FPS = 60
-
-local function GetTime()
-    local Hour = math.floor((tick() % 86400) / 3600)
-    local Minute = math.floor((tick() % 3600) / 60)
-    local Second = math.floor(tick() % 60)
-    local AMPM = Hour >= 12 and 'PM' or 'AM'
-    Hour = Hour % 12
-    if Hour == 0 then Hour = 12 end
-    return string.format('%02d:%02d:%02d %s', Hour, Minute, Second, AMPM)
-end
-
-local WatermarkConnection = game:GetService('RunService').RenderStepped:Connect(function()
-    FrameCounter += 1
-
-    if (tick() - FrameTimer) >= 1 then
-        FPS = FrameCounter
-        FrameTimer = tick()
-        FrameCounter = 0
-    end
-
-    local Ping = math.floor(game:GetService('Stats').Network.ServerStatsItem['Data Ping']:GetValue())
-    local Memory = math.floor(game:GetService('Stats'):GetTotalMemoryUsageMb())
-    
-    Library:SetWatermark(('dxe.exe | %s fps | %s ms | %s mb | %s'):format(
-        math.floor(FPS),
-        Ping,
-        Memory,
-        GetTime()
-    ))
-end)
 
 Library.KeybindFrame.Visible = true; -- todo: add a function for this
 
 Library:OnUnload(function()
-    WatermarkConnection:Disconnect()
     AnimationVisualizer.detach()
     AnimationLogger.detach()
     Library.Unloaded = true
@@ -619,6 +583,13 @@ Toggles.ShowHitboxes:OnChanged(function()
     shared.dxe.showHitboxes = Toggles.ShowHitboxes.Value
 end)
 
+-- Apply initial values (for autoload)
+task.defer(function()
+    task.wait(0.5) -- Wait for config to load
+    shared.dxe.silent = not Toggles.DebugNotifications.Value
+    shared.dxe.showHitboxes = Toggles.ShowHitboxes.Value
+end)
+
 Library.ToggleKeybind = Options.MenuKeybind -- Allows you to have a custom keybind for the menu
 
 -- Addons:
@@ -635,7 +606,7 @@ SaveManager:IgnoreThemeSettings()
 
 -- Adds our MenuKeybind to the ignore list
 -- (do you want each config to have a different menu key? probably not.)
-SaveManager:SetIgnoreIndexes({ 'MenuKeybind', 'WatermarkKeybind', 'KeybindListKeybind', 'DebugNotifications', 'ShowHitboxes' })
+SaveManager:SetIgnoreIndexes({ 'MenuKeybind', 'WatermarkKeybind', 'KeybindListKeybind' })
 
 -- use case for doing it this way:
 -- a script hub could have themes in a global folder
