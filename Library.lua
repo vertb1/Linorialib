@@ -3566,51 +3566,58 @@ local Toggles = {}
 	-- Watermark debug info update loop
 	do
 		local Stats = game:GetService("Stats")
-		local lastUpdate = 0
 		local frameCount = 0
 		local lastFpsTime = os.clock()
 		local currentFps = 60
+		local lastWatermarkUpdate = 0
 		
-		task.spawn(function()
-			while true do
-				task.wait(0.1)
-				
-				frameCount = frameCount + 1
-				local now = os.clock()
-				
-				-- Update FPS
-				if now - lastFpsTime >= 0.5 then
-					currentFps = frameCount / (now - lastFpsTime)
-					frameCount = 0
-					lastFpsTime = now
-				end
-				
-				if Library.Watermark and Library.Watermark.Visible then
-					local ping = 0
-					local cpu = 0
-					local dataRecv = 0
-					
-					pcall(function()
-						ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
-					end)
-					
-					pcall(function()
-						cpu = Stats:GetTotalMemoryUsageMb()
-					end)
-					
-					pcall(function()
-						dataRecv = Stats.Network.ServerStatsItem["Data Receive"]:GetValue()
-					end)
-					
-					local fps = math.floor(currentFps)
-					local text = string.format("dxe | %dms | %d fps | %.0f MB | %.1f kb/s", ping, fps, cpu, dataRecv / 1000)
-					
-					pcall(function()
-						Library:SetWatermark(text)
-					end)
-				end
+		-- Count frames accurately using RenderStepped
+		table.insert(Library.Signals, RunService.RenderStepped:Connect(function()
+			frameCount = frameCount + 1
+			local now = os.clock()
+			
+			-- Update FPS calculation every 0.5 seconds
+			if now - lastFpsTime >= 0.5 then
+				currentFps = frameCount / (now - lastFpsTime)
+				frameCount = 0
+				lastFpsTime = now
 			end
-		end)
+			
+			-- Update watermark text every 0.2 seconds
+			if now - lastWatermarkUpdate < 0.2 then return end
+			lastWatermarkUpdate = now
+			
+			if Library.Watermark and Library.Watermark.Visible then
+				local ping = 0
+				local memoryMb = 0
+				local dataSend = 0
+				local dataRecv = 0
+				
+				pcall(function()
+					ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+				end)
+				
+				pcall(function()
+					memoryMb = Stats:GetTotalMemoryUsageMb()
+				end)
+				
+				pcall(function()
+					dataSend = Stats.Network.ServerStatsItem["Data Send"]:GetValue()
+				end)
+				
+				pcall(function()
+					dataRecv = Stats.Network.ServerStatsItem["Data Receive"]:GetValue()
+				end)
+				
+				local fps = math.floor(currentFps + 0.5)
+				local text = string.format("dxe | %d fps | %dms | %.0f MB | ↑%.1f ↓%.1f kb/s", 
+					fps, ping, memoryMb, dataSend / 1000, dataRecv / 1000)
+				
+				pcall(function()
+					Library:SetWatermark(text)
+				end)
+			end
+		end))
 	end
 
 	function Library:ManuallyManagedNotify(Text)
