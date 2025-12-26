@@ -1,5 +1,6 @@
 -- AutoDefense Module for dxe
 -- Auto-parry system that listens to enemy animations and blocks at the right time
+-- Based on Lycoris-Rewrite blocking system
 
 local AutoDefense = {
     enabled = false,
@@ -26,9 +27,37 @@ local lastBlockTime = 0
 local lastNotifyTime = 0
 local NOTIFY_COOLDOWN = 0.5 -- seconds between notifications
 
--- Key handling (will be initialized)
-local KeyHandling = nil
-local InputClient = nil
+-- Remote references (direct path from SimpleSpy)
+local blockRemote = nil
+local unblockRemote = nil
+
+-- Get Block remote directly
+local function getBlockRemote()
+    if blockRemote then return blockRemote end
+    
+    pcall(function()
+        local events = ReplicatedStorage:FindFirstChild("EVENTS")
+        if events then
+            blockRemote = events:FindFirstChild("Block")
+        end
+    end)
+    
+    return blockRemote
+end
+
+-- Get Unblock remote (if it exists)
+local function getUnblockRemote()
+    if unblockRemote then return unblockRemote end
+    
+    pcall(function()
+        local events = ReplicatedStorage:FindFirstChild("EVENTS")
+        if events then
+            unblockRemote = events:FindFirstChild("Unblock")
+        end
+    end)
+    
+    return unblockRemote
+end
 
 -- Settings (can be changed via UI)
 AutoDefense.Settings = {
@@ -56,7 +85,9 @@ local ANIMATION_BLACKLIST = {
 local Library = nil
 local AnimationLogger = nil
 
--- Utility functions
+-- =============================================
+-- UTILITY FUNCTIONS
+-- =============================================
 local function formatAnimationId(animId)
     local id = tostring(animId)
     id = id:gsub("rbxassetid://", "")
@@ -77,7 +108,6 @@ local function notify(message, duration)
     end
 end
 
--- Debug notification (only shows when debug mode is on, with cooldown)
 local function debugNotify(message, duration)
     if not AutoDefense.debugMode or not Library then return end
     
@@ -88,7 +118,6 @@ local function debugNotify(message, duration)
     Library:Notify("[Debug] " .. message, duration or 2)
 end
 
--- Check if animation name is blacklisted
 local function isBlacklisted(animName)
     if not animName then return false end
     local lowerName = animName:lower()
@@ -100,7 +129,6 @@ local function isBlacklisted(animName)
     return false
 end
 
--- Get distance to entity
 local function getDistanceToEntity(entity)
     local character = LocalPlayer.Character
     if not character then return math.huge end
@@ -114,20 +142,18 @@ local function getDistanceToEntity(entity)
     return (localRoot.Position - entityRoot.Position).Magnitude
 end
 
--- Check if entity is targeting local player
 local function isTargetingMe(entity)
     local targetValue = entity:FindFirstChild("Target")
-    if not targetValue then return true end -- Assume yes if no target value
+    if not targetValue then return true end
     
     local character = LocalPlayer.Character
     return targetValue.Value == character
 end
 
--- Get the parry timing for an animation (returns nil if not in whitelist)
 local function getParryTiming(animId, animLength, animSpeed)
     local formattedId = formatAnimationId(animId)
     
-    -- First check detected timings from AnimationLogger
+    -- Check detected timings from AnimationLogger
     if AutoDefense.Settings.useDetectedTimings and AnimationLogger and type(AnimationLogger.getParryTimings) == "function" then
         local success, loggerTimings = pcall(function()
             return AnimationLogger.getParryTimings()
@@ -146,48 +172,35 @@ local function getParryTiming(animId, animLength, animSpeed)
         return AutoDefense.timings[formattedId]
     end
     
-    -- If onlyWhitelisted is true, return nil (don't parry unknown animations)
+    -- If onlyWhitelisted, return nil
     if AutoDefense.Settings.onlyWhitelisted then
         return nil
     end
     
-    -- Fallback: calculate based on animation length (only if not whitelisted mode)
+    -- Fallback calculation
     local adjustedLength = (animLength or 1) / (animSpeed or 1)
     local parryMs = adjustedLength * AutoDefense.Settings.fallbackParryPercent * 1000
-    
-    -- Clamp to reasonable range
     parryMs = math.clamp(parryMs, AutoDefense.Settings.minParryMs, AutoDefense.Settings.maxParryMs)
     
     debugLog("Using fallback timing for", formattedId, ":", parryMs, "ms")
     return parryMs
 end
 
--- Send block input to server (press F key)
-local function sendBlock()
-    local character = LocalPlayer.Character
-    if not character then 
-        debugLog("Block failed: No character")
-        return false 
-    end
-    
-    -- Get EffectReplicator to check state
+-- =============================================
+-- BLOCKING FUNCTIONS
+-- =============================================
+local function canBlock()
     local effectReplicator = ReplicatedStorage:FindFirstChild("EffectReplicator")
-    if not effectReplicator then 
-        debugLog("Block failed: No EffectReplicator")
-        return false 
-    end
+    if not effectReplicator then return false end
     
     local effectReplicatorModule
     pcall(function()
         effectReplicatorModule = require(effectReplicator)
     end)
     
-    if not effectReplicatorModule then 
-        debugLog("Block failed: Can't require EffectReplicator")
-        return false 
-    end
+    if not effectReplicatorModule then return false end
     
-    -- Check if we can block (not in action, not knocked, etc.)
+    -- Can't block if in action or knocked
     if effectReplicatorModule:FindEffect("Action") then
         debugLog("Cannot block - in action")
         return false
@@ -198,12 +211,53 @@ local function sendBlock()
         return false
     end
     
-    if effectReplicatorModule:HasEffect("Blocking") then
+    return true
+end
+
+local function isCurrentlyBlocking()
+    local effectReplicator = ReplicatedStorage:FindFirstChild("EffectReplicator")
+    if not effectReplicator then return false end
+    
+    local effectReplicatorModule
+    pcall(function()
+        effectReplicatorModule = require(effectReplicator)
+    end)
+    
+    if not effectReplicatorModule then return false end
+    return effectReplicatorModule:HasEffect("Blocking")
+end
+
+local function sendBlock()
+    local character = LocalPlayer.Character
+    if not character then 
+        debugLog("Block failed: No character")
+        return false 
+    end
+    
+    if not canBlock() then
+        return false
+    end
+    
+    if isCurrentlyBlocking() then
         debugLog("Already blocking")
         return true
     end
     
-    -- Press F key using VirtualInputManager
+    -- Method 1: Use Block remote directly (from SimpleSpy)
+    local remote = getBlockRemote()
+    if remote then
+        local success = pcall(function()
+            remote:FireServer()
+        end)
+        if success then
+            isBlocking = true
+            lastBlockTime = os.clock()
+            debugLog("Block sent via EVENTS.Block remote!")
+            return true
+        end
+    end
+    
+    -- Method 2: Use VirtualInputManager to press F (fallback)
     local success = pcall(function()
         VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.F, false, game)
     end)
@@ -211,31 +265,44 @@ local function sendBlock()
     if success then
         isBlocking = true
         lastBlockTime = os.clock()
-        debugLog("Block sent (F key pressed)!")
+        debugLog("Block sent via VIM (F key)!")
         return true
     end
     
-    debugLog("Block failed: VirtualInputManager error")
+    debugLog("Block failed: No method worked")
     return false
 end
 
--- Send unblock input (release F key)
 local function sendUnblock()
     if not isBlocking then return end
     
-    -- Release F key
+    -- Method 1: Use Unblock remote if it exists
+    local remote = getUnblockRemote()
+    if remote then
+        pcall(function()
+            remote:FireServer()
+        end)
+        isBlocking = false
+        debugLog("Unblock sent via EVENTS.Unblock remote!")
+        return
+    end
+    
+    -- Method 2: Release F key
     pcall(function()
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.F, false, game)
     end)
     
     isBlocking = false
-    debugLog("Unblock sent (F key released)!")
+    debugLog("Unblock sent via VIM!")
 end
 
--- Schedule a parry
+-- =============================================
+-- PARRY SCHEDULING
+-- =============================================
 local function scheduleParry(animId, animName, entityName, parryMs, track)
     local now = os.clock()
-    local executeAt = now + (parryMs - AutoDefense.Settings.parryEarlyMs) / 1000
+    local delayMs = math.max(0, parryMs - AutoDefense.Settings.parryEarlyMs)
+    local executeAt = now + delayMs / 1000
     
     table.insert(pendingParries, {
         animId = animId,
@@ -246,25 +313,23 @@ local function scheduleParry(animId, animName, entityName, parryMs, track)
         scheduled = now,
     })
     
-    local delayMs = parryMs - AutoDefense.Settings.parryEarlyMs
     debugLog(string.format("Scheduled parry for %s's %s in %.0fms", entityName, animName or animId, delayMs))
 end
 
--- Process pending parries
 local function processPendingParries()
     local now = os.clock()
     
     for i = #pendingParries, 1, -1 do
         local parry = pendingParries[i]
         
-        -- Check if animation stopped
+        -- Cancel if animation stopped
         if parry.track and not parry.track.IsPlaying then
             debugLog("Parry cancelled - animation stopped:", parry.animName or parry.animId)
             table.remove(pendingParries, i)
             continue
         end
         
-        -- Check if it's time to parry
+        -- Execute when time
         if now >= parry.executeAt then
             debugLog(string.format("Executing parry for %s's %s", parry.entityName, parry.animName or parry.animId))
             
@@ -284,7 +349,9 @@ local function processPendingParries()
     end
 end
 
--- Handle animation played on an entity
+-- =============================================
+-- ANIMATION TRACKING
+-- =============================================
 local function onAnimationPlayed(animator, track)
     if not AutoDefense.Settings.enabled then return end
     if not track or not track.Animation then return end
@@ -292,43 +359,37 @@ local function onAnimationPlayed(animator, track)
     local entity = animator:FindFirstAncestorWhichIsA("Model")
     if not entity then return end
     
-    -- Skip local player's animations
+    -- Skip local player
     if entity == LocalPlayer.Character then return end
     
-    -- Get animation info
     local animId = track.Animation.AnimationId
     local animName = track.Animation.Name
     local formattedId = formatAnimationId(animId)
     
-    -- Skip blacklisted animations (defensive/movement)
+    -- Skip blacklisted
     if isBlacklisted(animName) then return end
     
-    -- Distance check FIRST (most important filter)
+    -- Distance check
     local distance = getDistanceToEntity(entity)
     if distance > AutoDefense.Settings.maxDistance then return end
     
-    -- Target check (optional)
+    -- Target check
     if AutoDefense.Settings.onlyTargeted and not isTargetingMe(entity) then
         return
     end
     
-    -- Get parry timing (returns nil if not in whitelist when onlyWhitelisted is true)
+    -- Get timing (nil if not whitelisted)
     local parryMs = getParryTiming(animId, track.Length, track.Speed)
-    
-    -- Skip if no timing found (not in whitelist)
     if not parryMs then
-        debugLog("Skipping unknown animation:", animName or formattedId)
         return
     end
     
-    debugLog(string.format("Attack detected: %s playing %s @ %.1f studs (%.0fms timing)", 
+    debugLog(string.format("Attack: %s playing %s @ %.1f studs (%.0fms)", 
         entity.Name, animName or formattedId, distance, parryMs))
     
-    -- Schedule the parry
     scheduleParry(formattedId, animName, entity.Name, parryMs, track)
 end
 
--- Track an animator
 local function trackAnimator(animator)
     if trackedAnimators[animator] then return end
     
@@ -340,7 +401,6 @@ local function trackAnimator(animator)
     table.insert(connections, conn)
 end
 
--- Scan for animators in a model
 local function scanForAnimators(model)
     for _, descendant in pairs(model:GetDescendants()) do
         if descendant:IsA("Animator") then
@@ -349,22 +409,30 @@ local function scanForAnimators(model)
     end
 end
 
--- Start auto defense
+-- =============================================
+-- PUBLIC API
+-- =============================================
 function AutoDefense.start()
     if AutoDefense.Settings.enabled then return end
     
     AutoDefense.Settings.enabled = true
-    debugLog("Auto Defense started")
+    debugLog("Auto Defense starting...")
     
-    -- Scan workspace for existing animators
+    -- Try to find Block remote
+    local remote = getBlockRemote()
+    if remote then
+        debugLog("Found Block remote at EVENTS.Block!")
+    else
+        debugLog("Block remote not found, using VIM fallback")
+    end
+    
+    -- Scan for animators
     scanForAnimators(workspace)
     
-    -- Scan Live folder specifically
     local live = workspace:FindFirstChild("Live")
     if live then
         scanForAnimators(live)
         
-        -- Watch for new entities in Live
         local liveConn = live.DescendantAdded:Connect(function(descendant)
             if descendant:IsA("Animator") then
                 trackAnimator(descendant)
@@ -373,7 +441,6 @@ function AutoDefense.start()
         table.insert(connections, liveConn)
     end
     
-    -- Watch for new animators in workspace
     local wsConn = workspace.DescendantAdded:Connect(function(descendant)
         if descendant:IsA("Animator") then
             trackAnimator(descendant)
@@ -381,7 +448,7 @@ function AutoDefense.start()
     end)
     table.insert(connections, wsConn)
     
-    -- Update loop for processing pending parries
+    -- Update loop
     local updateConn = RunService.RenderStepped:Connect(function()
         if AutoDefense.Settings.enabled then
             processPendingParries()
@@ -389,14 +456,13 @@ function AutoDefense.start()
     end)
     table.insert(connections, updateConn)
     
-    notify("Auto Defense enabled", 2)
+    local remote = getBlockRemote()
+    notify("Auto Defense enabled" .. (remote and " (remote)" or " (VIM)"), 2)
 end
 
--- Stop auto defense
 function AutoDefense.stop()
     AutoDefense.Settings.enabled = false
     
-    -- Clean up connections
     for _, conn in pairs(connections) do
         if conn and conn.Connected then
             conn:Disconnect()
@@ -406,14 +472,12 @@ function AutoDefense.stop()
     trackedAnimators = {}
     pendingParries = {}
     
-    -- Make sure we're not stuck blocking
     sendUnblock()
     
     debugLog("Auto Defense stopped")
     notify("Auto Defense disabled", 2)
 end
 
--- Toggle auto defense
 function AutoDefense.toggle()
     if AutoDefense.Settings.enabled then
         AutoDefense.stop()
@@ -422,14 +486,12 @@ function AutoDefense.toggle()
     end
 end
 
--- Set a manual timing for an animation
 function AutoDefense.setTiming(animId, parryMs)
     local formattedId = formatAnimationId(animId)
     AutoDefense.timings[formattedId] = parryMs
     debugLog("Set timing for", formattedId, "to", parryMs, "ms")
 end
 
--- Import timings from AnimationLogger
 function AutoDefense.importTimings()
     if not AnimationLogger then
         notify("AnimationLogger not available", 2)
@@ -437,7 +499,7 @@ function AutoDefense.importTimings()
     end
     
     if type(AnimationLogger.getParryTimings) ~= "function" then
-        notify("AnimationLogger.getParryTimings not available (update AnimationLogger)", 3)
+        notify("AnimationLogger.getParryTimings not available", 3)
         return
     end
     
@@ -458,50 +520,18 @@ function AutoDefense.importTimings()
         end
     end
     
-    notify(string.format("Imported %d timings from AnimationLogger", count), 3)
+    notify(string.format("Imported %d timings", count), 3)
     debugLog("Imported", count, "timings")
 end
 
--- Initialize the module
 function AutoDefense.init(lib, animLogger)
     Library = lib
     AnimationLogger = animLogger
     
-    -- Initialize shared table if needed
     shared.dxe = shared.dxe or {}
     shared.dxe.AutoDefense = AutoDefense
     
-    -- Try to load KeyHandling module (Lycoris style)
-    pcall(function()
-        -- Check if already loaded in shared
-        if shared.KeyHandling then
-            KeyHandling = shared.KeyHandling
-            debugLog("Using shared KeyHandling")
-        end
-    end)
-    
-    -- Try to load InputClient module
-    pcall(function()
-        if shared.InputClient then
-            InputClient = shared.InputClient
-            debugLog("Using shared InputClient")
-        end
-    end)
-    
-    debugLog("Auto Defense initialized", KeyHandling and "(KeyHandling found)" or "(KeyHandling not found)")
+    debugLog("Auto Defense initialized")
 end
 
--- Set KeyHandling module externally
-function AutoDefense.setKeyHandling(keyHandlingModule)
-    KeyHandling = keyHandlingModule
-    debugLog("KeyHandling set externally")
-end
-
--- Set InputClient module externally
-function AutoDefense.setInputClient(inputClientModule)
-    InputClient = inputClientModule
-    debugLog("InputClient set externally")
-end
-
--- Return module
 return AutoDefense
