@@ -8,6 +8,7 @@ local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/v
 local AnimationVisualizer = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/AnimationVisualizer.lua"))()
 local AnimationLogger = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/AnimationLogger.lua"))()
 local ESP = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/esp.lua"))()
+local AutoDefense = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/AutoDefense.lua"))()
 
 local Window = Library:CreateWindow({
     Title = 'dxe.exe',
@@ -26,6 +27,7 @@ local Window = Library:CreateWindow({
 local Tabs = {
     -- Creates a new tab titled Main
     Main = Window:AddTab('Main'),
+    Combat = Window:AddTab('Combat'),
     ['UI Settings'] = Window:AddTab('UI Settings'),
 }
 
@@ -438,6 +440,218 @@ if ESP and ESP.Settings then
     end)
 end
 
+-- ============================================
+-- COMBAT TAB - Auto Defense
+-- ============================================
+local DefenseGroupBox = Tabs.Combat:AddLeftGroupbox('Auto Defense')
+
+DefenseGroupBox:AddToggle('AutoDefenseEnabled', {
+    Text = 'Enable Auto Defense',
+    Default = false,
+    Tooltip = 'Automatically parry enemy attacks'
+})
+
+DefenseGroupBox:AddSlider('AutoDefenseDistance', {
+    Text = 'Max Distance',
+    Default = 50,
+    Min = 10,
+    Max = 100,
+    Rounding = 0,
+    Tooltip = 'Maximum distance to auto-parry enemies'
+})
+
+DefenseGroupBox:AddSlider('AutoDefenseEarlyMs', {
+    Text = 'Early Compensation (ms)',
+    Default = 50,
+    Min = 0,
+    Max = 200,
+    Rounding = 0,
+    Tooltip = 'How early to parry (ping compensation)'
+})
+
+DefenseGroupBox:AddSlider('AutoDefenseBlockDuration', {
+    Text = 'Block Duration (ms)',
+    Default = 150,
+    Min = 50,
+    Max = 500,
+    Rounding = 0,
+    Tooltip = 'How long to hold block'
+})
+
+DefenseGroupBox:AddToggle('AutoDefenseOnlyTargeted', {
+    Text = 'Only When Targeted',
+    Default = false,
+    Tooltip = 'Only parry if enemy is targeting you'
+})
+
+DefenseGroupBox:AddToggle('AutoDefenseUseDetected', {
+    Text = 'Use Detected Timings',
+    Default = true,
+    Tooltip = 'Use parry timings learned from AnimationLogger'
+})
+
+DefenseGroupBox:AddToggle('AutoDefenseDebug', {
+    Text = 'Debug Mode',
+    Default = false,
+    Tooltip = 'Show debug info in console'
+})
+
+DefenseGroupBox:AddButton({
+    Text = 'Import Timings from Logger',
+    Func = function()
+        if AutoDefense and AutoDefense.importTimings then
+            AutoDefense.importTimings()
+        end
+    end,
+    Tooltip = 'Import learned parry timings from AnimationLogger'
+})
+
+-- Fallback Settings
+local FallbackGroupBox = Tabs.Combat:AddLeftGroupbox('Fallback Settings')
+
+FallbackGroupBox:AddSlider('AutoDefenseFallbackPercent', {
+    Text = 'Fallback Parry %',
+    Default = 45,
+    Min = 20,
+    Max = 80,
+    Rounding = 0,
+    Tooltip = 'When no timing data, parry at this % of animation'
+})
+
+FallbackGroupBox:AddSlider('AutoDefenseMinMs', {
+    Text = 'Min Parry Time (ms)',
+    Default = 100,
+    Min = 50,
+    Max = 300,
+    Rounding = 0,
+    Tooltip = 'Minimum time into animation to parry'
+})
+
+FallbackGroupBox:AddSlider('AutoDefenseMaxMs', {
+    Text = 'Max Parry Time (ms)',
+    Default = 800,
+    Min = 400,
+    Max = 1500,
+    Rounding = 0,
+    Tooltip = 'Maximum time into animation to parry'
+})
+
+-- Auto Defense Callbacks
+if AutoDefense then
+    AutoDefense.init(Library, AnimationLogger)
+    
+    Toggles.AutoDefenseEnabled:OnChanged(function()
+        if Toggles.AutoDefenseEnabled.Value then
+            AutoDefense.start()
+        else
+            AutoDefense.stop()
+        end
+    end)
+    
+    Options.AutoDefenseDistance:OnChanged(function()
+        AutoDefense.Settings.maxDistance = Options.AutoDefenseDistance.Value
+    end)
+    
+    Options.AutoDefenseEarlyMs:OnChanged(function()
+        AutoDefense.Settings.parryEarlyMs = Options.AutoDefenseEarlyMs.Value
+    end)
+    
+    Options.AutoDefenseBlockDuration:OnChanged(function()
+        AutoDefense.Settings.blockDuration = Options.AutoDefenseBlockDuration.Value / 1000
+    end)
+    
+    Toggles.AutoDefenseOnlyTargeted:OnChanged(function()
+        AutoDefense.Settings.onlyTargeted = Toggles.AutoDefenseOnlyTargeted.Value
+    end)
+    
+    Toggles.AutoDefenseUseDetected:OnChanged(function()
+        AutoDefense.Settings.useDetectedTimings = Toggles.AutoDefenseUseDetected.Value
+    end)
+    
+    Toggles.AutoDefenseDebug:OnChanged(function()
+        AutoDefense.debugMode = Toggles.AutoDefenseDebug.Value
+    end)
+    
+    Options.AutoDefenseFallbackPercent:OnChanged(function()
+        AutoDefense.Settings.fallbackParryPercent = Options.AutoDefenseFallbackPercent.Value / 100
+    end)
+    
+    Options.AutoDefenseMinMs:OnChanged(function()
+        AutoDefense.Settings.minParryMs = Options.AutoDefenseMinMs.Value
+    end)
+    
+    Options.AutoDefenseMaxMs:OnChanged(function()
+        AutoDefense.Settings.maxParryMs = Options.AutoDefenseMaxMs.Value
+    end)
+end
+
+-- Animation Logger Controls on Combat tab
+local LoggerGroupBox = Tabs.Combat:AddRightGroupbox('Animation Logger')
+
+LoggerGroupBox:AddToggle('AnimLoggerVisible', {
+    Text = 'Show Logger Window',
+    Default = false,
+    Tooltip = 'Show the animation logger window'
+}):AddKeyPicker('AnimLoggerKeybind', {
+    Default = 'L',
+    Mode = 'Toggle',
+    Text = 'Animation Logger',
+    NoUI = true
+})
+
+LoggerGroupBox:AddSlider('AnimLoggerDistance', {
+    Text = 'Log Distance',
+    Default = 100,
+    Min = 10,
+    Max = 500,
+    Rounding = 0,
+})
+
+LoggerGroupBox:AddToggle('AnimLoggerNPCsOnly', {
+    Text = 'NPCs Only',
+    Default = false,
+})
+
+LoggerGroupBox:AddToggle('AnimLoggerPlayersOnly', {
+    Text = 'Players Only',
+    Default = false,
+})
+
+-- Animation Logger Callbacks
+if AnimationLogger then
+    Toggles.AnimLoggerVisible:OnChanged(function()
+        if AnimationLogger.setVisible then
+            AnimationLogger.setVisible(Toggles.AnimLoggerVisible.Value)
+        end
+    end)
+    
+    Options.AnimLoggerDistance:OnChanged(function()
+        if AnimationLogger.setMaxDistance then
+            AnimationLogger.setMaxDistance(Options.AnimLoggerDistance.Value)
+        end
+    end)
+    
+    Toggles.AnimLoggerNPCsOnly:OnChanged(function()
+        if AnimationLogger.setFilter then
+            if Toggles.AnimLoggerNPCsOnly.Value then
+                AnimationLogger.setFilter("npc")
+            elseif not Toggles.AnimLoggerPlayersOnly.Value then
+                AnimationLogger.setFilter("all")
+            end
+        end
+    end)
+    
+    Toggles.AnimLoggerPlayersOnly:OnChanged(function()
+        if AnimationLogger.setFilter then
+            if Toggles.AnimLoggerPlayersOnly.Value then
+                AnimationLogger.setFilter("player")
+            elseif not Toggles.AnimLoggerNPCsOnly.Value then
+                AnimationLogger.setFilter("all")
+            end
+        end
+    end)
+end
+
 local TabBox = Tabs.Main:AddRightTabbox() -- Add Tabbox on right side
 
 -- Anything we can do in a Groupbox, we can do in a Tabbox tab (AddToggle, AddSlider, AddLabel, etc etc...)
@@ -635,6 +849,41 @@ task.defer(function()
         ESP.Settings.useTeamColors = Toggles.ESPTeamColors.Value
         ESP.Settings.allyColor = Options.ESPAllyColor.Value
         ESP.Settings.enemyColor = Options.ESPEnemyColor.Value
+    end
+    
+    -- Apply AutoDefense settings from loaded config
+    if AutoDefense and AutoDefense.Settings then
+        AutoDefense.Settings.maxDistance = Options.AutoDefenseDistance.Value
+        AutoDefense.Settings.parryEarlyMs = Options.AutoDefenseEarlyMs.Value
+        AutoDefense.Settings.blockDuration = Options.AutoDefenseBlockDuration.Value / 1000
+        AutoDefense.Settings.onlyTargeted = Toggles.AutoDefenseOnlyTargeted.Value
+        AutoDefense.Settings.useDetectedTimings = Toggles.AutoDefenseUseDetected.Value
+        AutoDefense.debugMode = Toggles.AutoDefenseDebug.Value
+        AutoDefense.Settings.fallbackParryPercent = Options.AutoDefenseFallbackPercent.Value / 100
+        AutoDefense.Settings.minParryMs = Options.AutoDefenseMinMs.Value
+        AutoDefense.Settings.maxParryMs = Options.AutoDefenseMaxMs.Value
+        
+        -- Start if enabled
+        if Toggles.AutoDefenseEnabled.Value then
+            AutoDefense.start()
+        end
+    end
+    
+    -- Apply AnimationLogger settings
+    if AnimationLogger then
+        if AnimationLogger.setMaxDistance then
+            AnimationLogger.setMaxDistance(Options.AnimLoggerDistance.Value)
+        end
+        if AnimationLogger.setVisible then
+            AnimationLogger.setVisible(Toggles.AnimLoggerVisible.Value)
+        end
+        if AnimationLogger.setFilter then
+            if Toggles.AnimLoggerNPCsOnly.Value then
+                AnimationLogger.setFilter("npc")
+            elseif Toggles.AnimLoggerPlayersOnly.Value then
+                AnimationLogger.setFilter("player")
+            end
+        end
     end
 end)
 
