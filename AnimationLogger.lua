@@ -42,7 +42,8 @@ local MOVEMENT_NAMES = {
 -- TRUE PARRY animation patterns (only these = successful parry)
 -- "parry" alone is an attempt, "trueparry" is a successful parry
 local TRUE_PARRY_PATTERNS = {
-    "trueparry", "true_parry", "perfectparry", "perfect_parry",
+    "trueparry", "trueparry1", "trueparry2", "trueparry3", "trueparry4",
+    "true_parry", "perfectparry", "perfect_parry",
     "successfulparry", "successful_parry",
 }
 
