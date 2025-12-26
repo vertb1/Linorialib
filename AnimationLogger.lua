@@ -32,7 +32,11 @@ local MOVEMENT_NAMES = {
     "stagger", "stagger1", "stagger2", "stagger3", "stagger4",
     "hit", "hurt", "flinch", "knockback", "knockdown", "stunned",
     -- Defensive animations (not attacks)
-    "block", "parry", "guard", "defend",
+    "block", "block1", "block2", "block3", "block4",
+    "parry", "parry1", "parry2", "parry3", "parry4",
+    "trueparry", "trueparry1", "trueparry2", "trueparry3", "trueparry4",
+    "true_parry", "perfectparry", "perfect_parry",
+    "guard", "defend", "deflect", "counter", "riposte",
 }
 
 -- TRUE PARRY animation patterns (only these = successful parry)
