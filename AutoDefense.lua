@@ -23,6 +23,10 @@ local pendingParries = {} -- { animId, entityName, executeAt, track }
 local isBlocking = false
 local lastBlockTime = 0
 
+-- Key handling (will be initialized)
+local KeyHandling = nil
+local InputClient = nil
+
 -- Settings (can be changed via UI)
 AutoDefense.Settings = {
     enabled = false,
@@ -73,6 +77,13 @@ end
 local function notify(message, duration)
     if Library and not (shared.dxe and shared.dxe.silent) then
         Library:Notify(message, duration or 2)
+    end
+end
+
+-- Debug notification (only shows when debug mode is on)
+local function debugNotify(message, duration)
+    if AutoDefense.debugMode and Library then
+        Library:Notify("[Debug] " .. message, duration or 2)
     end
 end
 
@@ -150,28 +161,40 @@ local function getParryTiming(animId, animLength, animSpeed)
     return parryMs
 end
 
--- Send block input to server
+-- Send block input to server (using KeyHandling like Lycoris)
 local function sendBlock()
     local character = LocalPlayer.Character
-    if not character then return end
+    if not character then 
+        debugNotify("❌ Block failed: No character", 1)
+        return false 
+    end
     
+    -- Get EffectReplicator to check state
     local effectReplicator = ReplicatedStorage:FindFirstChild("EffectReplicator")
-    if not effectReplicator then return end
+    if not effectReplicator then 
+        debugNotify("❌ Block failed: No EffectReplicator", 1)
+        return false 
+    end
     
     local effectReplicatorModule
     pcall(function()
         effectReplicatorModule = require(effectReplicator)
     end)
     
-    if not effectReplicatorModule then return end
+    if not effectReplicatorModule then 
+        debugNotify("❌ Block failed: Can't require EffectReplicator", 1)
+        return false 
+    end
     
     -- Check if we can block (not in action, not knocked, etc.)
     if effectReplicatorModule:FindEffect("Action") then
+        debugNotify("❌ Block failed: In action", 1)
         debugLog("Cannot block - in action")
         return false
     end
     
     if effectReplicatorModule:FindEffect("Knocked") then
+        debugNotify("❌ Block failed: Knocked", 1)
         debugLog("Cannot block - knocked")
         return false
     end
@@ -181,51 +204,50 @@ local function sendBlock()
         return true
     end
     
-    -- Find block remote
-    local characterHandler = character:FindFirstChild("CharacterHandler")
-    if not characterHandler then return false end
-    
-    local keyHandler = characterHandler:FindFirstChild("KeyHandler")
-    if not keyHandler then return false end
-    
-    -- Try to find block remote from KeyHandler's remotes
-    local remotes = keyHandler:FindFirstChild("Remotes")
-    local blockRemote = nil
-    
-    if remotes then
-        blockRemote = remotes:FindFirstChild("Block")
-    end
-    
-    -- Alternative: search in ReplicatedStorage
-    if not blockRemote then
-        local shared = ReplicatedStorage:FindFirstChild("Shared")
-        if shared then
-            local remoteFolder = shared:FindFirstChild("Remotes")
-            if remoteFolder then
-                blockRemote = remoteFolder:FindFirstChild("Block")
+    -- Try using KeyHandling (Lycoris method)
+    if KeyHandling then
+        local blockRemote = KeyHandling.getRemote and KeyHandling.getRemote("Block")
+        if blockRemote then
+            -- Remove M1 buffering if present
+            local bufferEffect = effectReplicatorModule:FindEffect("M1Buffering")
+            if bufferEffect then
+                bufferEffect:Remove()
             end
+            
+            -- Fire block
+            local fireServer = Instance.new("RemoteEvent").FireServer
+            fireServer(blockRemote)
+            
+            -- Set input data if available
+            if InputClient then
+                local inputData = InputClient.getInputData and InputClient.getInputData()
+                if inputData then
+                    inputData["f"] = true
+                end
+            end
+            
+            isBlocking = true
+            lastBlockTime = os.clock()
+            debugLog("Block sent via KeyHandling!")
+            return true
         end
     end
     
-    if blockRemote and blockRemote:IsA("RemoteEvent") then
-        blockRemote:FireServer()
+    -- Fallback: Use VirtualInputManager to press F
+    local success = pcall(function()
+        local vim = game:GetService("VirtualInputManager")
+        vim:SendKeyEvent(true, Enum.KeyCode.F, false, game)
+    end)
+    
+    if success then
         isBlocking = true
         lastBlockTime = os.clock()
-        debugLog("Block sent!")
+        debugLog("Block sent via VirtualInput!")
         return true
     end
     
-    -- Fallback: Use VirtualInputManager or keypress simulation
-    -- This simulates pressing F (default block key)
-    pcall(function()
-        local vim = game:GetService("VirtualInputManager")
-        vim:SendKeyEvent(true, Enum.KeyCode.F, false, game)
-        task.delay(AutoDefense.Settings.blockDuration, function()
-            vim:SendKeyEvent(false, Enum.KeyCode.F, false, game)
-        end)
-    end)
-    
-    return true
+    debugNotify("❌ Block failed: No method available", 1)
+    return false
 end
 
 -- Send unblock input
@@ -235,6 +257,7 @@ local function sendUnblock()
     local character = LocalPlayer.Character
     if not character then return end
     
+    -- Get EffectReplicator
     local effectReplicator = ReplicatedStorage:FindFirstChild("EffectReplicator")
     if not effectReplicator then return end
     
@@ -243,30 +266,37 @@ local function sendUnblock()
         effectReplicatorModule = require(effectReplicator)
     end)
     
-    if not effectReplicatorModule then return end
-    
-    if not effectReplicatorModule:HasEffect("Blocking") then
+    if effectReplicatorModule and not effectReplicatorModule:HasEffect("Blocking") then
         isBlocking = false
         return
     end
     
-    -- Find unblock remote
-    local characterHandler = character:FindFirstChild("CharacterHandler")
-    if not characterHandler then return end
-    
-    local keyHandler = characterHandler:FindFirstChild("KeyHandler")
-    if not keyHandler then return end
-    
-    local remotes = keyHandler:FindFirstChild("Remotes")
-    local unblockRemote = nil
-    
-    if remotes then
-        unblockRemote = remotes:FindFirstChild("Unblock")
+    -- Try using KeyHandling (Lycoris method)
+    if KeyHandling then
+        local unblockRemote = KeyHandling.getRemote and KeyHandling.getRemote("Unblock")
+        if unblockRemote then
+            local fireServer = Instance.new("RemoteEvent").FireServer
+            fireServer(unblockRemote)
+            
+            -- Set input data if available
+            if InputClient then
+                local inputData = InputClient.getInputData and InputClient.getInputData()
+                if inputData then
+                    inputData["f"] = false
+                end
+            end
+            
+            isBlocking = false
+            debugLog("Unblock sent via KeyHandling!")
+            return
+        end
     end
     
-    if unblockRemote and unblockRemote:IsA("RemoteEvent") then
-        unblockRemote:FireServer()
-    end
+    -- Fallback: Use VirtualInputManager to release F
+    pcall(function()
+        local vim = game:GetService("VirtualInputManager")
+        vim:SendKeyEvent(false, Enum.KeyCode.F, false, game)
+    end)
     
     isBlocking = false
     debugLog("Unblock sent!")
@@ -286,7 +316,9 @@ local function scheduleParry(animId, animName, entityName, parryMs, track)
         scheduled = now,
     })
     
-    debugLog(string.format("Scheduled parry for %s's %s in %.0fms", entityName, animName or animId, parryMs - AutoDefense.Settings.parryEarlyMs))
+    local delayMs = parryMs - AutoDefense.Settings.parryEarlyMs
+    debugLog(string.format("Scheduled parry for %s's %s in %.0fms", entityName, animName or animId, delayMs))
+    debugNotify(string.format("⏱ Queued: %s in %.0fms", animName or animId, delayMs), 1.5)
 end
 
 -- Process pending parries
@@ -299,6 +331,7 @@ local function processPendingParries()
         -- Check if animation stopped
         if parry.track and not parry.track.IsPlaying then
             debugLog("Parry cancelled - animation stopped:", parry.animName or parry.animId)
+            debugNotify(string.format("⚪ Cancelled: %s (anim stopped)", parry.animName or parry.animId), 1.5)
             table.remove(pendingParries, i)
             continue
         end
@@ -308,12 +341,14 @@ local function processPendingParries()
             debugLog(string.format("Executing parry for %s's %s", parry.entityName, parry.animName or parry.animId))
             
             if sendBlock() then
-                notify(string.format("⚔ Auto-parry: %s", parry.animName or parry.animId), 1)
+                debugNotify(string.format("✓ Parry: %s's %s", parry.entityName, parry.animName or parry.animId), 1.5)
                 
                 -- Schedule unblock
                 task.delay(AutoDefense.Settings.blockDuration, function()
                     sendUnblock()
                 end)
+            else
+                debugNotify(string.format("✗ Failed: %s's %s", parry.entityName, parry.animName or parry.animId), 1.5)
             end
             
             table.remove(pendingParries, i)
@@ -509,7 +544,36 @@ function AutoDefense.init(lib, animLogger)
     shared.dxe = shared.dxe or {}
     shared.dxe.AutoDefense = AutoDefense
     
-    debugLog("Auto Defense initialized")
+    -- Try to load KeyHandling module (Lycoris style)
+    pcall(function()
+        -- Check if already loaded in shared
+        if shared.KeyHandling then
+            KeyHandling = shared.KeyHandling
+            debugLog("Using shared KeyHandling")
+        end
+    end)
+    
+    -- Try to load InputClient module
+    pcall(function()
+        if shared.InputClient then
+            InputClient = shared.InputClient
+            debugLog("Using shared InputClient")
+        end
+    end)
+    
+    debugLog("Auto Defense initialized", KeyHandling and "(KeyHandling found)" or "(KeyHandling not found)")
+end
+
+-- Set KeyHandling module externally
+function AutoDefense.setKeyHandling(keyHandlingModule)
+    KeyHandling = keyHandlingModule
+    debugLog("KeyHandling set externally")
+end
+
+-- Set InputClient module externally
+function AutoDefense.setInputClient(inputClientModule)
+    InputClient = inputClientModule
+    debugLog("InputClient set externally")
 end
 
 -- Return module
