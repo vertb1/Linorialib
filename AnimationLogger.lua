@@ -37,6 +37,8 @@ local MOVEMENT_NAMES = {
     "trueparry", "trueparry1", "trueparry2", "trueparry3", "trueparry4",
     "true_parry", "perfectparry", "perfect_parry",
     "guard", "defend", "deflect", "counter", "riposte",
+    -- Rest/idle animations
+    "rest", "rest1", "rest2", "rest3", "rest4",
 }
 
 -- TRUE PARRY animation patterns (only these = successful parry)
