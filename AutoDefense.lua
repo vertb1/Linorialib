@@ -3,7 +3,7 @@
 
 local AutoDefense = {
     enabled = false,
-    timings = {}, -- animId -> { parryMs, count }
+    timings = {}, -- animId -> parryMs (whitelist of animations to parry)
     debugMode = false,
 }
 
@@ -12,6 +12,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 -- Local player
 local LocalPlayer = Players.LocalPlayer
@@ -22,6 +23,8 @@ local trackedAnimators = {}
 local pendingParries = {} -- { animId, entityName, executeAt, track }
 local isBlocking = false
 local lastBlockTime = 0
+local lastNotifyTime = 0
+local NOTIFY_COOLDOWN = 0.5 -- seconds between notifications
 
 -- Key handling (will be initialized)
 local KeyHandling = nil
@@ -38,13 +41,7 @@ AutoDefense.Settings = {
     fallbackParryPercent = 0.45, -- Fallback: parry at this % of animation if no timing data
     minParryMs = 100, -- Minimum ms into animation to parry
     maxParryMs = 800, -- Maximum ms into animation to parry
-}
-
--- Default timings (animId -> ms to parry)
--- These will be overwritten by detected timings from AnimationLogger
-local defaultTimings = {
-    -- These are examples, real timings come from AnimationLogger
-    -- ["12345678"] = 350,
+    onlyWhitelisted = true, -- Only parry animations with known timings
 }
 
 -- Animation blacklist (defensive animations we don't react to)
@@ -80,11 +77,15 @@ local function notify(message, duration)
     end
 end
 
--- Debug notification (only shows when debug mode is on)
+-- Debug notification (only shows when debug mode is on, with cooldown)
 local function debugNotify(message, duration)
-    if AutoDefense.debugMode and Library then
-        Library:Notify("[Debug] " .. message, duration or 2)
-    end
+    if not AutoDefense.debugMode or not Library then return end
+    
+    local now = os.clock()
+    if now - lastNotifyTime < NOTIFY_COOLDOWN then return end
+    lastNotifyTime = now
+    
+    Library:Notify("[Debug] " .. message, duration or 2)
 end
 
 -- Check if animation name is blacklisted
@@ -122,7 +123,7 @@ local function isTargetingMe(entity)
     return targetValue.Value == character
 end
 
--- Get the parry timing for an animation
+-- Get the parry timing for an animation (returns nil if not in whitelist)
 local function getParryTiming(animId, animLength, animSpeed)
     local formattedId = formatAnimationId(animId)
     
@@ -145,12 +146,12 @@ local function getParryTiming(animId, animLength, animSpeed)
         return AutoDefense.timings[formattedId]
     end
     
-    -- Check default timings
-    if defaultTimings[formattedId] then
-        return defaultTimings[formattedId]
+    -- If onlyWhitelisted is true, return nil (don't parry unknown animations)
+    if AutoDefense.Settings.onlyWhitelisted then
+        return nil
     end
     
-    -- Fallback: calculate based on animation length
+    -- Fallback: calculate based on animation length (only if not whitelisted mode)
     local adjustedLength = (animLength or 1) / (animSpeed or 1)
     local parryMs = adjustedLength * AutoDefense.Settings.fallbackParryPercent * 1000
     
@@ -161,18 +162,18 @@ local function getParryTiming(animId, animLength, animSpeed)
     return parryMs
 end
 
--- Send block input to server (using KeyHandling like Lycoris)
+-- Send block input to server (press F key)
 local function sendBlock()
     local character = LocalPlayer.Character
     if not character then 
-        debugNotify("❌ Block failed: No character", 1)
+        debugLog("Block failed: No character")
         return false 
     end
     
     -- Get EffectReplicator to check state
     local effectReplicator = ReplicatedStorage:FindFirstChild("EffectReplicator")
     if not effectReplicator then 
-        debugNotify("❌ Block failed: No EffectReplicator", 1)
+        debugLog("Block failed: No EffectReplicator")
         return false 
     end
     
@@ -182,19 +183,17 @@ local function sendBlock()
     end)
     
     if not effectReplicatorModule then 
-        debugNotify("❌ Block failed: Can't require EffectReplicator", 1)
+        debugLog("Block failed: Can't require EffectReplicator")
         return false 
     end
     
     -- Check if we can block (not in action, not knocked, etc.)
     if effectReplicatorModule:FindEffect("Action") then
-        debugNotify("❌ Block failed: In action", 1)
         debugLog("Cannot block - in action")
         return false
     end
     
     if effectReplicatorModule:FindEffect("Knocked") then
-        debugNotify("❌ Block failed: Knocked", 1)
         debugLog("Cannot block - knocked")
         return false
     end
@@ -204,102 +203,33 @@ local function sendBlock()
         return true
     end
     
-    -- Try using KeyHandling (Lycoris method)
-    if KeyHandling then
-        local blockRemote = KeyHandling.getRemote and KeyHandling.getRemote("Block")
-        if blockRemote then
-            -- Remove M1 buffering if present
-            local bufferEffect = effectReplicatorModule:FindEffect("M1Buffering")
-            if bufferEffect then
-                bufferEffect:Remove()
-            end
-            
-            -- Fire block
-            local fireServer = Instance.new("RemoteEvent").FireServer
-            fireServer(blockRemote)
-            
-            -- Set input data if available
-            if InputClient then
-                local inputData = InputClient.getInputData and InputClient.getInputData()
-                if inputData then
-                    inputData["f"] = true
-                end
-            end
-            
-            isBlocking = true
-            lastBlockTime = os.clock()
-            debugLog("Block sent via KeyHandling!")
-            return true
-        end
-    end
-    
-    -- Fallback: Use VirtualInputManager to press F
+    -- Press F key using VirtualInputManager
     local success = pcall(function()
-        local vim = game:GetService("VirtualInputManager")
-        vim:SendKeyEvent(true, Enum.KeyCode.F, false, game)
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.F, false, game)
     end)
     
     if success then
         isBlocking = true
         lastBlockTime = os.clock()
-        debugLog("Block sent via VirtualInput!")
+        debugLog("Block sent (F key pressed)!")
         return true
     end
     
-    debugNotify("❌ Block failed: No method available", 1)
+    debugLog("Block failed: VirtualInputManager error")
     return false
 end
 
--- Send unblock input
+-- Send unblock input (release F key)
 local function sendUnblock()
     if not isBlocking then return end
     
-    local character = LocalPlayer.Character
-    if not character then return end
-    
-    -- Get EffectReplicator
-    local effectReplicator = ReplicatedStorage:FindFirstChild("EffectReplicator")
-    if not effectReplicator then return end
-    
-    local effectReplicatorModule
+    -- Release F key
     pcall(function()
-        effectReplicatorModule = require(effectReplicator)
-    end)
-    
-    if effectReplicatorModule and not effectReplicatorModule:HasEffect("Blocking") then
-        isBlocking = false
-        return
-    end
-    
-    -- Try using KeyHandling (Lycoris method)
-    if KeyHandling then
-        local unblockRemote = KeyHandling.getRemote and KeyHandling.getRemote("Unblock")
-        if unblockRemote then
-            local fireServer = Instance.new("RemoteEvent").FireServer
-            fireServer(unblockRemote)
-            
-            -- Set input data if available
-            if InputClient then
-                local inputData = InputClient.getInputData and InputClient.getInputData()
-                if inputData then
-                    inputData["f"] = false
-                end
-            end
-            
-            isBlocking = false
-            debugLog("Unblock sent via KeyHandling!")
-            return
-        end
-    end
-    
-    -- Fallback: Use VirtualInputManager to release F
-    pcall(function()
-        local vim = game:GetService("VirtualInputManager")
-        vim:SendKeyEvent(false, Enum.KeyCode.F, false, game)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.F, false, game)
     end)
     
     isBlocking = false
-    debugLog("Unblock sent!")
+    debugLog("Unblock sent (F key released)!")
 end
 
 -- Schedule a parry
@@ -318,7 +248,6 @@ local function scheduleParry(animId, animName, entityName, parryMs, track)
     
     local delayMs = parryMs - AutoDefense.Settings.parryEarlyMs
     debugLog(string.format("Scheduled parry for %s's %s in %.0fms", entityName, animName or animId, delayMs))
-    debugNotify(string.format("⏱ Queued: %s in %.0fms", animName or animId, delayMs), 1.5)
 end
 
 -- Process pending parries
@@ -331,7 +260,6 @@ local function processPendingParries()
         -- Check if animation stopped
         if parry.track and not parry.track.IsPlaying then
             debugLog("Parry cancelled - animation stopped:", parry.animName or parry.animId)
-            debugNotify(string.format("⚪ Cancelled: %s (anim stopped)", parry.animName or parry.animId), 1.5)
             table.remove(pendingParries, i)
             continue
         end
@@ -341,14 +269,14 @@ local function processPendingParries()
             debugLog(string.format("Executing parry for %s's %s", parry.entityName, parry.animName or parry.animId))
             
             if sendBlock() then
-                debugNotify(string.format("✓ Parry: %s's %s", parry.entityName, parry.animName or parry.animId), 1.5)
+                debugNotify(string.format("⚔ Parry: %s", parry.animName or parry.animId), 1)
                 
                 -- Schedule unblock
                 task.delay(AutoDefense.Settings.blockDuration, function()
                     sendUnblock()
                 end)
             else
-                debugNotify(string.format("✗ Failed: %s's %s", parry.entityName, parry.animName or parry.animId), 1.5)
+                debugNotify(string.format("✗ Failed: %s", parry.animName or parry.animId), 1)
             end
             
             table.remove(pendingParries, i)
@@ -372,30 +300,29 @@ local function onAnimationPlayed(animator, track)
     local animName = track.Animation.Name
     local formattedId = formatAnimationId(animId)
     
-    -- Skip blacklisted animations
+    -- Skip blacklisted animations (defensive/movement)
     if isBlacklisted(animName) then return end
     
-    -- Skip non-action priority (only react to attacks)
-    local priority = track.Priority.Name
-    if priority ~= "Action" and priority ~= "Action2" and priority ~= "Action3" and priority ~= "Action4" then
-        return
-    end
-    
-    -- Distance check
+    -- Distance check FIRST (most important filter)
     local distance = getDistanceToEntity(entity)
     if distance > AutoDefense.Settings.maxDistance then return end
     
     -- Target check (optional)
     if AutoDefense.Settings.onlyTargeted and not isTargetingMe(entity) then
-        debugLog("Skipping - not targeting me:", entity.Name)
         return
     end
     
-    -- Get parry timing
+    -- Get parry timing (returns nil if not in whitelist when onlyWhitelisted is true)
     local parryMs = getParryTiming(animId, track.Length, track.Speed)
     
-    debugLog(string.format("Enemy attack detected: %s playing %s (%.0fms timing)", 
-        entity.Name, animName or formattedId, parryMs))
+    -- Skip if no timing found (not in whitelist)
+    if not parryMs then
+        debugLog("Skipping unknown animation:", animName or formattedId)
+        return
+    end
+    
+    debugLog(string.format("Attack detected: %s playing %s @ %.1f studs (%.0fms timing)", 
+        entity.Name, animName or formattedId, distance, parryMs))
     
     -- Schedule the parry
     scheduleParry(formattedId, animName, entity.Name, parryMs, track)
