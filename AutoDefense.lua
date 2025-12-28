@@ -27,14 +27,60 @@ local lastBlockTime = 0
 local lastNotifyTime = 0
 local NOTIFY_COOLDOWN = 0.5 -- seconds between notifications
 
--- Remote references (direct path from SimpleSpy)
+-- Forward declare debugLog for use in early functions
+local function debugLog(...)
+    if AutoDefense.debugMode then
+        print("[AutoDefense]", ...)
+    end
+end
+
+-- Remote references
 local blockRemote = nil
 local unblockRemote = nil
+local keyHandlingInitialized = false
 
--- Get Block remote directly
+-- Try to require KeyHandling and InputClient modules
+local KeyHandling = nil
+local InputClient = nil
+
+local function initModules()
+    if keyHandlingInitialized then return true end
+    
+    -- Try to load KeyHandling
+    local success1 = pcall(function()
+        KeyHandling = require(script.Parent:FindFirstChild("KeyHandling"))
+        if KeyHandling and KeyHandling.init then
+            KeyHandling.init()
+        end
+    end)
+    
+    -- Try to load InputClient
+    local success2 = pcall(function()
+        InputClient = require(script.Parent:FindFirstChild("InputClient"))
+    end)
+    
+    keyHandlingInitialized = success1 or success2
+    debugLog("Module init:", success1 and "KeyHandling OK" or "KeyHandling failed", success2 and "InputClient OK" or "InputClient failed")
+    return keyHandlingInitialized
+end
+
+-- Get Block remote (using KeyHandling hash system)
 local function getBlockRemote()
     if blockRemote then return blockRemote end
     
+    -- Method 1: Use KeyHandling (proper hashed remote)
+    if KeyHandling and KeyHandling.getRemote then
+        local success, result = pcall(function()
+            return KeyHandling.getRemote("Block")
+        end)
+        if success and result then
+            blockRemote = result
+            debugLog("Found Block remote via KeyHandling")
+            return blockRemote
+        end
+    end
+    
+    -- Method 2: Direct path (fallback for non-obfuscated games)
     pcall(function()
         local events = ReplicatedStorage:FindFirstChild("EVENTS")
         if events then
@@ -42,19 +88,40 @@ local function getBlockRemote()
         end
     end)
     
+    if blockRemote then
+        debugLog("Found Block remote via EVENTS")
+    end
+    
     return blockRemote
 end
 
--- Get Unblock remote (if it exists)
+-- Get Unblock remote
 local function getUnblockRemote()
     if unblockRemote then return unblockRemote end
     
+    -- Method 1: Use KeyHandling
+    if KeyHandling and KeyHandling.getRemote then
+        local success, result = pcall(function()
+            return KeyHandling.getRemote("Unblock")
+        end)
+        if success and result then
+            unblockRemote = result
+            debugLog("Found Unblock remote via KeyHandling")
+            return unblockRemote
+        end
+    end
+    
+    -- Method 2: Direct path
     pcall(function()
         local events = ReplicatedStorage:FindFirstChild("EVENTS")
         if events then
             unblockRemote = events:FindFirstChild("Unblock")
         end
     end)
+    
+    if unblockRemote then
+        debugLog("Found Unblock remote via EVENTS")
+    end
     
     return unblockRemote
 end
@@ -94,12 +161,6 @@ local function formatAnimationId(animId)
     id = id:gsub("http://www.roblox.com/asset/%?id=", "")
     id = id:gsub("https://www.roblox.com/asset/%?id=", "")
     return id
-end
-
-local function debugLog(...)
-    if AutoDefense.debugMode then
-        print("[AutoDefense]", ...)
-    end
 end
 
 local function notify(message, duration)
@@ -187,26 +248,71 @@ local function getParryTiming(animId, animLength, animSpeed)
 end
 
 -- =============================================
+-- EFFECT CHECKING (with fallback)
+-- =============================================
+local effectReplicatorModule = nil
+local effectCheckFailed = false
+
+local function getEffectModule()
+    if effectReplicatorModule then return effectReplicatorModule end
+    if effectCheckFailed then return nil end
+    
+    local success, result = pcall(function()
+        local effectReplicator = ReplicatedStorage:FindFirstChild("EffectReplicator")
+        if effectReplicator then
+            return require(effectReplicator)
+        end
+        return nil
+    end)
+    
+    if success and result then
+        effectReplicatorModule = result
+        debugLog("EffectReplicator module found")
+        return effectReplicatorModule
+    else
+        effectCheckFailed = true
+        debugLog("EffectReplicator module not found, using fallback")
+        return nil
+    end
+end
+
+local function hasEffect(effectName)
+    local module = getEffectModule()
+    if not module then return false end
+    
+    local success, result = pcall(function()
+        -- Try different method names
+        if type(module.HasEffect) == "function" then
+            return module:HasEffect(effectName)
+        elseif type(module.FindEffect) == "function" then
+            return module:FindEffect(effectName) ~= nil
+        elseif type(module.hasEffect) == "function" then
+            return module:hasEffect(effectName)
+        end
+        return false
+    end)
+    
+    return success and result
+end
+
+-- =============================================
 -- BLOCKING FUNCTIONS
 -- =============================================
 local function canBlock()
-    local effectReplicator = ReplicatedStorage:FindFirstChild("EffectReplicator")
-    if not effectReplicator then return false end
-    
-    local effectReplicatorModule
-    pcall(function()
-        effectReplicatorModule = require(effectReplicator)
-    end)
-    
-    if not effectReplicatorModule then return false end
+    -- If we don't have effect checking, allow blocking (let the game validate)
+    local module = getEffectModule()
+    if not module then 
+        debugLog("No effect module, allowing block attempt")
+        return true 
+    end
     
     -- Can't block if in action or knocked
-    if effectReplicatorModule:FindEffect("Action") then
+    if hasEffect("Action") then
         debugLog("Cannot block - in action")
         return false
     end
     
-    if effectReplicatorModule:FindEffect("Knocked") then
+    if hasEffect("Knocked") then
         debugLog("Cannot block - knocked")
         return false
     end
@@ -215,16 +321,7 @@ local function canBlock()
 end
 
 local function isCurrentlyBlocking()
-    local effectReplicator = ReplicatedStorage:FindFirstChild("EffectReplicator")
-    if not effectReplicator then return false end
-    
-    local effectReplicatorModule
-    pcall(function()
-        effectReplicatorModule = require(effectReplicator)
-    end)
-    
-    if not effectReplicatorModule then return false end
-    return effectReplicatorModule:HasEffect("Blocking")
+    return hasEffect("Blocking")
 end
 
 local function sendBlock()
@@ -235,6 +332,7 @@ local function sendBlock()
     end
     
     if not canBlock() then
+        debugLog("Block failed: canBlock returned false")
         return false
     end
     
@@ -243,22 +341,35 @@ local function sendBlock()
         return true
     end
     
-    -- Method 1: Use Block remote directly (from SimpleSpy)
+    -- Method 1: Use Block remote with proper FireServer
     local remote = getBlockRemote()
     if remote then
-        local success = pcall(function()
-            remote:FireServer()
+        -- Try with input data if available
+        if InputClient and InputClient.getInputData then
+            local inputData = InputClient.getInputData()
+            if inputData then
+                inputData["f"] = true -- Set block flag
+            end
+        end
+        
+        local fireServer = Instance.new("RemoteEvent").FireServer
+        local success, err = pcall(function()
+            fireServer(remote)
         end)
         if success then
             isBlocking = true
             lastBlockTime = os.clock()
-            debugLog("Block sent via EVENTS.Block remote!")
+            debugLog("Block sent via remote!")
             return true
+        else
+            debugLog("Block remote failed:", tostring(err))
         end
+    else
+        debugLog("No Block remote found")
     end
     
     -- Method 2: Use VirtualInputManager to press F (fallback)
-    local success = pcall(function()
+    local success, err = pcall(function()
         VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.F, false, game)
     end)
     
@@ -267,6 +378,22 @@ local function sendBlock()
         lastBlockTime = os.clock()
         debugLog("Block sent via VIM (F key)!")
         return true
+    else
+        debugLog("VIM block failed:", tostring(err))
+    end
+    
+    -- Method 3: Try mouse button 2 (right click for block in some games)
+    local success2, err2 = pcall(function()
+        VirtualInputManager:SendMouseButtonEvent(0, 0, 1, true, game, 0)
+    end)
+    
+    if success2 then
+        isBlocking = true
+        lastBlockTime = os.clock()
+        debugLog("Block sent via VIM (Right Click)!")
+        return true
+    else
+        debugLog("VIM right click failed:", tostring(err2))
     end
     
     debugLog("Block failed: No method worked")
@@ -276,20 +403,34 @@ end
 local function sendUnblock()
     if not isBlocking then return end
     
+    -- Update input data if available
+    if InputClient and InputClient.getInputData then
+        local inputData = InputClient.getInputData()
+        if inputData then
+            inputData["f"] = false -- Clear block flag
+        end
+    end
+    
     -- Method 1: Use Unblock remote if it exists
     local remote = getUnblockRemote()
     if remote then
+        local fireServer = Instance.new("RemoteEvent").FireServer
         pcall(function()
-            remote:FireServer()
+            fireServer(remote)
         end)
         isBlocking = false
-        debugLog("Unblock sent via EVENTS.Unblock remote!")
+        debugLog("Unblock sent via remote!")
         return
     end
     
     -- Method 2: Release F key
     pcall(function()
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.F, false, game)
+    end)
+    
+    -- Method 3: Release right click
+    pcall(function()
+        VirtualInputManager:SendMouseButtonEvent(0, 0, 1, false, game, 0)
     end)
     
     isBlocking = false
@@ -418,12 +559,17 @@ function AutoDefense.start()
     AutoDefense.Settings.enabled = true
     debugLog("Auto Defense starting...")
     
+    -- Initialize modules
+    initModules()
+    
     -- Try to find Block remote
     local remote = getBlockRemote()
     if remote then
-        debugLog("Found Block remote at EVENTS.Block!")
+        debugLog("Found Block remote!")
+        notify("Auto Defense: Block remote found", 2)
     else
         debugLog("Block remote not found, using VIM fallback")
+        notify("Auto Defense: Using VIM fallback (F key)", 2)
     end
     
     -- Scan for animators
