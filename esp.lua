@@ -1,5 +1,5 @@
--- ESP Module Reconstructed from MoonSec V3 Bytecode
--- Deobfuscated using tupsutumppu/MoonsecDeobfuscator
+-- ESP Module Reconstructed
+-- With font selection, customizable colors, and toggle options
 
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -14,6 +14,14 @@ local DEFAULT_PROXIMITY_DISTANCE = 100
 local DEFAULT_ARROW_SIZE = 20
 local DEBUG_THROTTLE_TIME = 5
 local HEALTH_BAR_OFFSET = 7.4
+
+-- Font map for dropdown
+local FONT_MAP = {
+    ["UI"] = 0,
+    ["System"] = 1,
+    ["Plex"] = 2,
+    ["Monospace"] = 3,
+}
 
 local ALLY_COLOR = Color3.fromRGB(0, 255, 0)
 local ENEMY_COLOR = Color3.fromRGB(255, 0, 0)
@@ -44,6 +52,7 @@ local Settings = {
     useTeamColors = true,
     allyColor = ALLY_COLOR,
     enemyColor = ENEMY_COLOR,
+    nameColor = WHITE_COLOR, -- New: name/text color
     maxDistance = DEFAULT_MAX_DISTANCE,
     showBoxes = true,
     showTracers = false,
@@ -52,10 +61,15 @@ local Settings = {
     showPostureBar = true,
     showLifeforceBar = true,
     showLevel = true,
+    showName = true, -- New: toggle for name
+    showHealth = true, -- New: toggle for health display
+    showHealthPercent = true, -- New: toggle for health percent
+    showDistance = true, -- New: toggle for distance
     showProximityArrows = false,
     maxProximityDistance = DEFAULT_PROXIMITY_DISTANCE,
     textSize = DEFAULT_TEXT_SIZE,
     font = DEFAULT_FONT,
+    fontName = "Monospace", -- New: font name for dropdown
     arrowSize = DEFAULT_ARROW_SIZE,
     debugMode = false
 }
@@ -89,6 +103,7 @@ local EntityESP = {}
 EntityESP.__index = EntityESP
 EntityESP.ClassName = "EntityESP"
 EntityESP.Settings = Settings
+EntityESP.FontMap = FONT_MAP -- Export for UI
 
 local idCounter = 0
 
@@ -119,7 +134,7 @@ function EntityESP.new(player)
     self.label.Text = ""
     self.label.Size = Settings.textSize
     self.label.Color = WHITE_COLOR
-    self.label.Font = 3 -- Monospace/Code font
+    self.label.Font = Settings.font
     
     -- Box
     self.box = Drawing.new("Quad")
@@ -152,7 +167,7 @@ function EntityESP.new(player)
     self.postureBar.Visible = false
     self.postureBar.Thickness = 1
     self.postureBar.Filled = false
-    self.postureBar.Color = POSTURE_COLOR
+    self.postureBar.Color = WHITE_COLOR
     
     -- Posture bar value
     self.postureBarValue = Drawing.new("Quad")
@@ -166,7 +181,7 @@ function EntityESP.new(player)
     self.lifeforceBar.Visible = false
     self.lifeforceBar.Thickness = 1
     self.lifeforceBar.Filled = false
-    self.lifeforceBar.Color = LIFEFORCE_COLOR
+    self.lifeforceBar.Color = WHITE_COLOR
     
     -- Lifeforce bar value
     self.lifeforceBarValue = Drawing.new("Quad")
@@ -209,16 +224,17 @@ function EntityESP:getTrianglePoints(position, angle)
            Vector2.new(floor(p3x), floor(p3y))
 end
 
-function EntityESP:setFont(font)
-    if self.label then
-        self.label.Font = font or DEFAULT_FONT
+function EntityESP:setFont(fontNameOrIndex)
+    if type(fontNameOrIndex) == "string" then
+        Settings.fontName = fontNameOrIndex
+        Settings.font = FONT_MAP[fontNameOrIndex] or DEFAULT_FONT
+    else
+        Settings.font = fontNameOrIndex or DEFAULT_FONT
     end
 end
 
 function EntityESP:setTextSize(size)
-    if self.label then
-        self.label.Size = size or DEFAULT_TEXT_SIZE
-    end
+    Settings.textSize = size or DEFAULT_TEXT_SIZE
 end
 
 function EntityESP:hide(keepTriangle)
@@ -294,7 +310,6 @@ function EntityESP:update()
     local charFolder = liveFolder and liveFolder:FindFirstChild(self.playerName)
     
     -- Get Posture values from workspace.Live.PlayerName.Posture
-    -- Properties: .Value (current) and .MaxValue (max)
     local posture, maxPosture, posturePercent = 0, 100, 0
     if charFolder then
         local postureObj = charFolder:FindFirstChild("Posture")
@@ -308,7 +323,6 @@ function EntityESP:update()
     end
     
     -- Get Lifeforce values (Blood) from workspace.Live.PlayerName.Lifeforce
-    -- Properties: .Value (current) and .MaxValue (max)
     local lifeforce, maxLifeforce, lifeforcePercent = 0, 100, 0
     if charFolder then
         local lifeforceObj = charFolder:FindFirstChild("Lifeforce")
@@ -321,7 +335,7 @@ function EntityESP:update()
         end
     end
     
-    -- Get Level from Live folder attributes (workspace.Live.PlayerName:GetAttribute("LVL"))
+    -- Get Level from Live folder attributes
     local level = 0
     if charFolder then
         level = charFolder:GetAttribute("LVL") or 0
@@ -344,12 +358,16 @@ function EntityESP:update()
         return self:hide()
     end
     
+    -- Determine colors
     local color
     if Settings.useTeamColors then
         color = isEnemy and Settings.enemyColor or Settings.allyColor
     else
-        color = Settings.enemyColor -- Use enemy color as the universal color when team colors disabled
+        color = Settings.enemyColor
     end
+    
+    -- Name color (use nameColor setting or fall back to team color)
+    local textColor = Settings.nameColor or color
     
     -- Proximity arrows
     if Settings.showProximityArrows and not onScreen and distance < Settings.maxProximityDistance then
@@ -385,25 +403,52 @@ function EntityESP:update()
     -- Plugin data
     local plugin = self:getPlugin()
     
-    -- Label text with level
-    local levelText = Settings.showLevel and string.format(" [Lv.%d]", level) or ""
-    local labelText = string.format("[%s]%s [%d]\n[HP: %d/%d] [%d%%]%s",
-        plugin.playerName or self.playerName,
-        levelText,
-        floor(distance),
-        floor(health),
-        floor(maxHealth),
-        floor(healthPercent),
-        plugin.text or ""
-    )
+    -- Build label text based on settings
+    local labelParts = {}
+    
+    -- Name
+    if Settings.showName then
+        local nameText = plugin.playerName or self.playerName
+        if Settings.showLevel then
+            nameText = nameText .. string.format(" [Lv.%d]", level)
+        end
+        table.insert(labelParts, nameText)
+    end
+    
+    -- Distance
+    if Settings.showDistance then
+        table.insert(labelParts, string.format("[%d studs]", floor(distance)))
+    end
+    
+    -- Health
+    if Settings.showHealth then
+        local healthText = string.format("HP: %d/%d", floor(health), floor(maxHealth))
+        if Settings.showHealthPercent then
+            healthText = healthText .. string.format(" (%d%%)", floor(healthPercent))
+        end
+        table.insert(labelParts, healthText)
+    elseif Settings.showHealthPercent then
+        table.insert(labelParts, string.format("HP: %d%%", floor(healthPercent)))
+    end
+    
+    -- Plugin text
+    if plugin.text and plugin.text ~= "" then
+        table.insert(labelParts, plugin.text)
+    end
+    
+    local labelText = table.concat(labelParts, "\n")
     
     -- Update label
-    self.label.Visible = true
-    self.label.Position = Vector2.new(screenPos.X, screenPos.Y - self.label.TextBounds.Y)
-    self.label.Text = labelText
-    self.label.Color = color
-    self.label.Size = Settings.textSize
-    self.label.Font = Settings.font
+    if #labelParts > 0 then
+        self.label.Visible = true
+        self.label.Position = Vector2.new(screenPos.X, screenPos.Y - self.label.TextBounds.Y)
+        self.label.Text = labelText
+        self.label.Color = textColor
+        self.label.Size = Settings.textSize
+        self.label.Font = Settings.font
+    else
+        self.label.Visible = false
+    end
     
     -- Update box
     if Settings.showBoxes then
@@ -448,7 +493,7 @@ function EntityESP:update()
         local valueBottomRight = worldToViewportPoint(camera, position - offsetHealthValueBottom)
         
         self.healthBar.Visible = true
-        self.healthBar.Color = color
+        self.healthBar.Color = color -- Outline uses team color
         self.healthBar.PointA = Vector2.new(hbTopLeft.X, hbTopLeft.Y)
         self.healthBar.PointB = Vector2.new(hbBottomRight.X, hbTopLeft.Y)
         self.healthBar.PointC = Vector2.new(hbBottomRight.X, hbBottomRight.Y)
@@ -469,7 +514,6 @@ function EntityESP:update()
     if Settings.showPostureBar and maxPosture > 0 then
         local postureOffset = (1 - posturePercent / 100) * HEALTH_BAR_OFFSET
         
-        -- Posture bar on the right side
         local pbTopLeft = worldToViewportPoint(camera, position + self:convertVector(3, 3, 0))
         local pbBottomRight = worldToViewportPoint(camera, position + self:convertVector(3.5, -4.5, 0))
         
@@ -477,7 +521,7 @@ function EntityESP:update()
         local pValueBottomRight = worldToViewportPoint(camera, position + self:convertVector(3.45, -4.45, 0))
         
         self.postureBar.Visible = true
-        self.postureBar.Color = POSTURE_COLOR
+        self.postureBar.Color = color -- Outline uses team color now
         self.postureBar.PointA = Vector2.new(pbTopLeft.X, pbTopLeft.Y)
         self.postureBar.PointB = Vector2.new(pbBottomRight.X, pbTopLeft.Y)
         self.postureBar.PointC = Vector2.new(pbBottomRight.X, pbBottomRight.Y)
@@ -498,7 +542,6 @@ function EntityESP:update()
     if Settings.showLifeforceBar and maxLifeforce > 0 then
         local lifeforceOffset = (1 - lifeforcePercent / 100) * HEALTH_BAR_OFFSET
         
-        -- Lifeforce bar further right
         local lfTopLeft = worldToViewportPoint(camera, position + self:convertVector(4, 3, 0))
         local lfBottomRight = worldToViewportPoint(camera, position + self:convertVector(4.5, -4.5, 0))
         
@@ -506,7 +549,7 @@ function EntityESP:update()
         local lfValueBottomRight = worldToViewportPoint(camera, position + self:convertVector(4.45, -4.45, 0))
         
         self.lifeforceBar.Visible = true
-        self.lifeforceBar.Color = LIFEFORCE_COLOR
+        self.lifeforceBar.Color = color -- Outline uses team color now
         self.lifeforceBar.PointA = Vector2.new(lfTopLeft.X, lfTopLeft.Y)
         self.lifeforceBar.PointB = Vector2.new(lfBottomRight.X, lfTopLeft.Y)
         self.lifeforceBar.PointC = Vector2.new(lfBottomRight.X, lfBottomRight.Y)
@@ -581,6 +624,6 @@ Players.PlayerRemoving:Connect(onPlayerRemoving)
 RunService:BindToRenderStep(uniqueId, Enum.RenderPriority.Camera.Value, updateCamera)
 RunService:BindToRenderStep(uniqueId .. "_update", Enum.RenderPriority.Camera.Value + 1, updateAll)
 
-print("ESP Module Loaded")
+print("[dxe] ESP Module Loaded")
 
 return EntityESP
