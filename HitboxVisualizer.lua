@@ -1,60 +1,78 @@
--- Live Hitbox Visualizer
--- Shows hitboxes on players/NPCs in real-time
+-- Hitbox Visualizer (Snapshot-based)
+-- Creates hitbox visuals that stay at their spawn position (don't follow the entity)
+-- Useful for visualizing attack ranges and parry windows
 
 local HitboxVisualizer = {
     enabled = false,
-    showPlayers = true,
-    showNPCs = true,
-    showSelf = false,
-    hitboxSize = 3,
-    hitboxColor = Color3.fromRGB(255, 50, 50),
-    hitboxTransparency = 0.5,
-    maxDistance = 200,
+    defaultDuration = 0.5, -- How long hitboxes stay visible
+    defaultSize = Vector3.new(6, 6, 8), -- Default hitbox size
+    defaultColor = Color3.fromRGB(255, 50, 50),
+    defaultTransparency = 0.6,
+    fadeOut = true, -- Fade out before disappearing
+    maxHitboxes = 50, -- Max active hitboxes (cleanup old ones)
 }
 
 -- Services
-local Players = game:GetService("Players")
+local Debris = game:GetService("Debris")
+local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
-
-local LocalPlayer = Players.LocalPlayer
 
 -- Storage
 local hitboxFolder = nil
-local entityHitboxes = {} -- [entity] = { parts = {}, connections = {} }
-local updateConnection = nil
+local activeHitboxes = {} -- { part, createTime, duration }
+local hitboxCount = 0
 
--- Limbs to show hitboxes on
-local HITBOX_LIMBS = {
-    -- R6
-    "Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg",
-    -- R15
-    "Head", "UpperTorso", "LowerTorso",
-    "LeftHand", "RightHand", "LeftFoot", "RightFoot",
-    "LeftLowerArm", "RightLowerArm", "LeftUpperArm", "RightUpperArm",
-    "LeftLowerLeg", "RightLowerLeg", "LeftUpperLeg", "RightUpperLeg",
-}
+-- Animation path for reference (game-specific)
+local ANIMATION_PATH = "Assets.Animations"
 
----Create hitbox folder
+---Ensure hitbox folder exists
+---@return Folder
 local function ensureFolder()
     if not hitboxFolder or not hitboxFolder.Parent then
         hitboxFolder = Instance.new("Folder")
-        hitboxFolder.Name = "HitboxVisuals"
+        hitboxFolder.Name = "HitboxVisuals_Snapshot"
         hitboxFolder.Parent = Workspace
     end
     return hitboxFolder
 end
 
----Create a hitbox part for a limb
----@param limb BasePart
+---Get animations folder (for reference/lookup)
+---@return Instance?
+function HitboxVisualizer.getAnimationsFolder()
+    local assets = ReplicatedStorage:FindFirstChild("Assets")
+    if assets then
+        return assets:FindFirstChild("Animations")
+    end
+    return nil
+end
+
+---Create a snapshot hitbox at a specific CFrame
+---@param cframe CFrame The position/rotation of the hitbox
+---@param size Vector3? Size of the hitbox (optional)
+---@param color Color3? Color of the hitbox (optional)
+---@param duration number? How long it stays visible (optional)
+---@param transparency number? Transparency (optional)
 ---@return BasePart
-local function createHitbox(limb)
+function HitboxVisualizer.create(cframe, size, color, duration, transparency)
+    size = size or HitboxVisualizer.defaultSize
+    color = color or HitboxVisualizer.defaultColor
+    duration = duration or HitboxVisualizer.defaultDuration
+    transparency = transparency or HitboxVisualizer.defaultTransparency
+    
+    -- Cleanup old hitboxes if at max
+    if hitboxCount >= HitboxVisualizer.maxHitboxes then
+        HitboxVisualizer.cleanupOldest()
+    end
+    
     local hitbox = Instance.new("Part")
-    hitbox.Name = "HB_" .. limb.Name
-    hitbox.Shape = Enum.PartType.Ball
-    hitbox.Size = Vector3.new(HitboxVisualizer.hitboxSize, HitboxVisualizer.hitboxSize, HitboxVisualizer.hitboxSize)
-    hitbox.Color = HitboxVisualizer.hitboxColor
-    hitbox.Transparency = HitboxVisualizer.hitboxTransparency
+    hitbox.Name = "HB_Snapshot_" .. hitboxCount
+    hitbox.Shape = Enum.PartType.Block
+    hitbox.Size = size
+    hitbox.CFrame = cframe
+    hitbox.Color = color
+    hitbox.Transparency = transparency
     hitbox.Material = Enum.Material.ForceField
     hitbox.Anchored = true
     hitbox.CanCollide = false
@@ -63,181 +81,195 @@ local function createHitbox(limb)
     hitbox.CastShadow = false
     hitbox.Parent = ensureFolder()
     
+    hitboxCount = hitboxCount + 1
+    
+    local data = {
+        part = hitbox,
+        createTime = os.clock(),
+        duration = duration,
+        originalTransparency = transparency,
+    }
+    table.insert(activeHitboxes, data)
+    
+    -- Fade out and destroy
+    if HitboxVisualizer.fadeOut then
+        local fadeTime = math.min(duration * 0.4, 0.3)
+        local waitTime = duration - fadeTime
+        
+        task.delay(waitTime, function()
+            if hitbox and hitbox.Parent then
+                local tweenInfo = TweenInfo.new(fadeTime, Enum.EasingStyle.Linear)
+                local tween = TweenService:Create(hitbox, tweenInfo, { Transparency = 1 })
+                tween:Play()
+                tween.Completed:Wait()
+                if hitbox and hitbox.Parent then
+                    hitbox:Destroy()
+                end
+            end
+        end)
+    else
+        Debris:AddItem(hitbox, duration)
+    end
+    
     return hitbox
 end
 
----Create hitboxes for an entity
+---Create hitbox in front of an entity (attack hitbox visualization)
+---@param entity Model The entity performing the attack
+---@param offset Vector3? Offset from entity root (optional, default: forward)
+---@param size Vector3? Size of hitbox (optional)
+---@param color Color3? Color (optional)
+---@param duration number? Duration (optional)
+---@return BasePart?
+function HitboxVisualizer.createFromEntity(entity, offset, size, color, duration)
+    local root = entity:FindFirstChild("HumanoidRootPart")
+    if not root then return nil end
+    
+    offset = offset or Vector3.new(0, 0, -4) -- Default: in front of entity
+    size = size or HitboxVisualizer.defaultSize
+    
+    -- Calculate world position (snapshot - doesn't follow)
+    local cframe = root.CFrame * CFrame.new(offset)
+    
+    return HitboxVisualizer.create(cframe, size, color, duration)
+end
+
+---Create hitbox at entity's current position (body hitbox snapshot)
 ---@param entity Model
-local function createHitboxesForEntity(entity)
-    if entityHitboxes[entity] then return end
+---@param size Vector3?
+---@param color Color3?
+---@param duration number?
+---@return BasePart?
+function HitboxVisualizer.createAtEntity(entity, size, color, duration)
+    local root = entity:FindFirstChild("HumanoidRootPart")
+    if not root then return nil end
     
-    local data = {
-        parts = {},
-        limbMap = {},
-    }
+    size = size or Vector3.new(4, 6, 4)
     
-    for _, limbName in ipairs(HITBOX_LIMBS) do
-        local limb = entity:FindFirstChild(limbName)
-        if limb and limb:IsA("BasePart") then
-            local hitbox = createHitbox(limb)
-            data.parts[limb] = hitbox
-            data.limbMap[limbName] = { limb = limb, hitbox = hitbox }
+    return HitboxVisualizer.create(root.CFrame, size, color, duration)
+end
+
+---Create attack cone/arc visualization (for sweep attacks)
+---@param entity Model
+---@param arcAngle number Angle of arc in degrees
+---@param range number Range of the attack
+---@param color Color3?
+---@param duration number?
+---@return table Parts created
+function HitboxVisualizer.createArc(entity, arcAngle, range, color, duration)
+    local root = entity:FindFirstChild("HumanoidRootPart")
+    if not root then return {} end
+    
+    color = color or Color3.fromRGB(255, 165, 0) -- Orange for arcs
+    duration = duration or HitboxVisualizer.defaultDuration
+    
+    local parts = {}
+    local segments = math.ceil(arcAngle / 15) -- One segment per 15 degrees
+    local startAngle = -arcAngle / 2
+    
+    for i = 0, segments do
+        local angle = math.rad(startAngle + (arcAngle / segments) * i)
+        local offset = Vector3.new(math.sin(angle) * range, 0, -math.cos(angle) * range)
+        local cframe = root.CFrame * CFrame.new(offset)
+        
+        local part = HitboxVisualizer.create(cframe, Vector3.new(1, 6, 1), color, duration, 0.7)
+        table.insert(parts, part)
+    end
+    
+    return parts
+end
+
+---Create a hit indicator (small flash at position)
+---@param position Vector3
+---@param wasParried boolean? Green if parried, red if hit
+---@return BasePart
+function HitboxVisualizer.createHitIndicator(position, wasParried)
+    local color = wasParried and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 100, 100)
+    local size = Vector3.new(2, 2, 2)
+    
+    local cframe = CFrame.new(position)
+    return HitboxVisualizer.create(cframe, size, color, 0.3, 0.3)
+end
+
+---Create danger zone visualization (parry window indicator)
+---@param entity Model
+---@param range number
+---@param duration number?
+---@return BasePart?
+function HitboxVisualizer.createDangerZone(entity, range, duration)
+    local root = entity:FindFirstChild("HumanoidRootPart")
+    if not root then return nil end
+    
+    -- Yellow = danger/parry window
+    local color = Color3.fromRGB(255, 255, 0)
+    local size = Vector3.new(range * 2, 0.5, range * 2)
+    
+    -- Ground-level disc
+    local cframe = CFrame.new(root.Position.X, root.Position.Y - 3, root.Position.Z)
+    
+    return HitboxVisualizer.create(cframe, size, color, duration or 0.5, 0.7)
+end
+
+---Cleanup the oldest hitbox
+function HitboxVisualizer.cleanupOldest()
+    if #activeHitboxes == 0 then return end
+    
+    local oldest = table.remove(activeHitboxes, 1)
+    if oldest and oldest.part and oldest.part.Parent then
+        oldest.part:Destroy()
+    end
+    hitboxCount = math.max(0, hitboxCount - 1)
+end
+
+---Cleanup all hitboxes
+function HitboxVisualizer.cleanupAll()
+    for _, data in ipairs(activeHitboxes) do
+        if data.part and data.part.Parent then
+            data.part:Destroy()
         end
     end
+    activeHitboxes = {}
+    hitboxCount = 0
     
-    entityHitboxes[entity] = data
-end
-
----Remove hitboxes for an entity
----@param entity Model
-local function removeHitboxesForEntity(entity)
-    local data = entityHitboxes[entity]
-    if not data then return end
-    
-    for _, hitbox in pairs(data.parts) do
-        if hitbox and hitbox.Parent then
-            hitbox:Destroy()
-        end
-    end
-    
-    entityHitboxes[entity] = nil
-end
-
----Update hitbox positions for an entity
----@param entity Model
----@param data table
-local function updateEntityHitboxes(entity, data)
-    for limb, hitbox in pairs(data.parts) do
-        if limb and limb.Parent and hitbox and hitbox.Parent then
-            hitbox.CFrame = limb.CFrame
-            hitbox.Size = Vector3.new(HitboxVisualizer.hitboxSize, HitboxVisualizer.hitboxSize, HitboxVisualizer.hitboxSize)
-            hitbox.Color = HitboxVisualizer.hitboxColor
-            hitbox.Transparency = HitboxVisualizer.hitboxTransparency
-        end
+    if hitboxFolder then
+        hitboxFolder:ClearAllChildren()
     end
 end
 
----Check if entity is within range
----@param entity Model
----@return boolean
-local function isInRange(entity)
-    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    local theirRoot = entity:FindFirstChild("HumanoidRootPart") or entity.PrimaryPart
-    
-    if not myRoot or not theirRoot then return false end
-    
-    return (myRoot.Position - theirRoot.Position).Magnitude <= HitboxVisualizer.maxDistance
+---Set default duration
+---@param duration number
+function HitboxVisualizer.setDuration(duration)
+    HitboxVisualizer.defaultDuration = math.clamp(duration, 0.1, 5)
 end
 
----Check if entity is a player
----@param entity Model
----@return boolean
-local function isPlayer(entity)
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player.Character == entity then
-            return true
-        end
-    end
-    return false
+---Set default size
+---@param size Vector3
+function HitboxVisualizer.setSize(size)
+    HitboxVisualizer.defaultSize = size
 end
 
----Check if entity is local player
----@param entity Model
----@return boolean
-local function isLocalPlayer(entity)
-    return LocalPlayer.Character == entity
+---Set default color
+---@param color Color3
+function HitboxVisualizer.setColor(color)
+    HitboxVisualizer.defaultColor = color
 end
 
----Check if entity is an NPC (has humanoid but not a player)
----@param entity Model
----@return boolean
-local function isNPC(entity)
-    local humanoid = entity:FindFirstChildWhichIsA("Humanoid")
-    return humanoid ~= nil and not isPlayer(entity)
+---Set max hitboxes
+---@param max number
+function HitboxVisualizer.setMaxHitboxes(max)
+    HitboxVisualizer.maxHitboxes = math.clamp(max, 10, 200)
 end
 
----Should show hitboxes for this entity
----@param entity Model
----@return boolean
-local function shouldShowEntity(entity)
-    if not HitboxVisualizer.enabled then return false end
-    if not isInRange(entity) then return false end
-    
-    if isLocalPlayer(entity) then
-        return HitboxVisualizer.showSelf
-    elseif isPlayer(entity) then
-        return HitboxVisualizer.showPlayers
-    elseif isNPC(entity) then
-        return HitboxVisualizer.showNPCs
-    end
-    
-    return false
-end
-
----Main update loop
-local function onUpdate()
-    if not HitboxVisualizer.enabled then return end
-    
-    -- Get all entities with humanoids
-    local entities = {}
-    
-    -- Add players
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player.Character then
-            table.insert(entities, player.Character)
-        end
-    end
-    
-    -- Add NPCs (models with humanoids in workspace)
-    for _, child in ipairs(Workspace:GetDescendants()) do
-        if child:IsA("Model") and child:FindFirstChildWhichIsA("Humanoid") then
-            if not isPlayer(child) then
-                table.insert(entities, child)
-            end
-        end
-    end
-    
-    -- Update each entity
-    for _, entity in ipairs(entities) do
-        if shouldShowEntity(entity) then
-            if not entityHitboxes[entity] then
-                createHitboxesForEntity(entity)
-            end
-            updateEntityHitboxes(entity, entityHitboxes[entity])
-        else
-            removeHitboxesForEntity(entity)
-        end
-    end
-    
-    -- Clean up removed entities
-    for entity, _ in pairs(entityHitboxes) do
-        if not entity or not entity.Parent then
-            removeHitboxesForEntity(entity)
-        end
-    end
-end
-
----Enable hitbox visualization
+---Enable/disable
 function HitboxVisualizer.enable()
     HitboxVisualizer.enabled = true
-    
-    if not updateConnection then
-        updateConnection = RunService.RenderStepped:Connect(onUpdate)
-    end
 end
 
----Disable hitbox visualization
 function HitboxVisualizer.disable()
     HitboxVisualizer.enabled = false
-    
-    -- Clean up all hitboxes
-    for entity, _ in pairs(entityHitboxes) do
-        removeHitboxesForEntity(entity)
-    end
-    entityHitboxes = {}
+    HitboxVisualizer.cleanupAll()
 end
 
----Toggle hitbox visualization
 function HitboxVisualizer.toggle()
     if HitboxVisualizer.enabled then
         HitboxVisualizer.disable()
@@ -247,38 +279,9 @@ function HitboxVisualizer.toggle()
     return HitboxVisualizer.enabled
 end
 
----Set hitbox size
----@param size number
-function HitboxVisualizer.setSize(size)
-    HitboxVisualizer.hitboxSize = math.clamp(size, 0.5, 20)
-end
-
----Set hitbox color
----@param color Color3
-function HitboxVisualizer.setColor(color)
-    HitboxVisualizer.hitboxColor = color
-end
-
----Set hitbox transparency
----@param transparency number
-function HitboxVisualizer.setTransparency(transparency)
-    HitboxVisualizer.hitboxTransparency = math.clamp(transparency, 0, 1)
-end
-
----Set max distance
----@param distance number
-function HitboxVisualizer.setMaxDistance(distance)
-    HitboxVisualizer.maxDistance = math.max(distance, 10)
-end
-
----Cleanup
+---Full cleanup
 function HitboxVisualizer.cleanup()
     HitboxVisualizer.disable()
-    
-    if updateConnection then
-        updateConnection:Disconnect()
-        updateConnection = nil
-    end
     
     if hitboxFolder then
         hitboxFolder:Destroy()
@@ -286,4 +289,5 @@ function HitboxVisualizer.cleanup()
     end
 end
 
+-- Return module
 return HitboxVisualizer
