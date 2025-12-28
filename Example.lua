@@ -1081,6 +1081,20 @@ ToolsGroup:AddToggle('FilterConsole', {
     Tooltip = 'Only show dxe script output, hide game spam'
 })
 
+ToolsGroup:AddDivider()
+
+ToolsGroup:AddToggle('AutoRecordParryTimings', {
+    Text = 'Auto-Record Parry Timings',
+    Default = false,
+    Tooltip = 'Automatically record parry timings when you parry (disable for manual export only)'
+})
+
+ToolsGroup:AddToggle('AutoSaveOnParry', {
+    Text = 'Auto-Save on Parry',
+    Default = false,
+    Tooltip = 'Automatically save to file when parrying (requires Auto-Record enabled)'
+})
+
 -- Timing Config Management
 local TimingConfigGroup = Tabs['UI Settings']:AddRightGroupbox('Timing Configs')
 
@@ -1205,6 +1219,53 @@ TimingConfigGroup:AddButton({
     Tooltip = 'Clear all timings in memory (does not delete saved configs)'
 })
 
+TimingConfigGroup:AddButton({
+    Text = 'Clear Selected Config',
+    Func = function()
+        if AnimationLogger.saveConfig then
+            local name = Options.TimingConfigList.Value
+            if not name or name == "" then
+                return Library:Notify("Select a config from the list first", 2)
+            end
+            -- Clear memory first
+            if AnimationLogger.clearTimings then
+                AnimationLogger.clearTimings()
+            end
+            -- Save empty timings to the selected config
+            local success, result = AnimationLogger.saveConfig(name)
+            if success then
+                Library:Notify("Cleared config: " .. name, 2)
+            else
+                Library:Notify("Failed to clear: " .. (result or "unknown error"), 3)
+            end
+        end
+    end,
+    Tooltip = 'Clear all timings in the selected config file (for testing)'
+})
+
+TimingConfigGroup:AddButton({
+    Text = 'Clear ALL Configs',
+    Func = function()
+        if AnimationLogger.listConfigs and AnimationLogger.deleteConfig then
+            local configs = AnimationLogger.listConfigs()
+            local count = 0
+            for _, name in ipairs(configs) do
+                if AnimationLogger.deleteConfig(name) then
+                    count = count + 1
+                end
+            end
+            -- Also clear memory
+            if AnimationLogger.clearTimings then
+                AnimationLogger.clearTimings()
+            end
+            -- Refresh dropdown
+            Options.TimingConfigList:SetValues({})
+            Library:Notify("Deleted " .. count .. " configs", 2)
+        end
+    end,
+    Tooltip = 'DELETE all saved config files (cannot be undone!)'
+})
+
 Toggles.AnimVisualizerToggle:OnChanged(function()
     AnimationVisualizer.visible(Toggles.AnimVisualizerToggle.Value)
 end)
@@ -1224,6 +1285,18 @@ end)
 Toggles.FilterConsole:OnChanged(function()
     if shared.dxe.filterConsole then
         shared.dxe.filterConsole(Toggles.FilterConsole.Value)
+    end
+end)
+
+Toggles.AutoRecordParryTimings:OnChanged(function()
+    if AnimationLogger and AnimationLogger.Settings then
+        AnimationLogger.Settings.autoRecordParryTimings = Toggles.AutoRecordParryTimings.Value
+    end
+end)
+
+Toggles.AutoSaveOnParry:OnChanged(function()
+    if AnimationLogger and AnimationLogger.Settings then
+        AnimationLogger.Settings.autoSaveOnParry = Toggles.AutoSaveOnParry.Value
     end
 end)
 
