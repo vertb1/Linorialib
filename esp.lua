@@ -7,8 +7,20 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
 -- Constants
-local DEFAULT_FONT = 3 -- Drawing.Font: 0=UI, 1=System, 2=Plex, 3=Monospace (Code)
+-- Drawing.Fonts enum: 0=UI, 1=System, 2=Plex, 3=Monospace (Code)
+local DEFAULT_FONT = 3
 local DEFAULT_TEXT_SIZE = 13
+
+-- Try to use Drawing.Fonts if available (some executors use this)
+local function getFont(index)
+    if Drawing and Drawing.Fonts then
+        if index == 0 then return Drawing.Fonts.UI end
+        if index == 1 then return Drawing.Fonts.System end
+        if index == 2 then return Drawing.Fonts.Plex end
+        if index == 3 then return Drawing.Fonts.Monospace end
+    end
+    return index
+end
 local DEFAULT_MAX_DISTANCE = 1000
 local DEFAULT_PROXIMITY_DISTANCE = 100
 local DEFAULT_ARROW_SIZE = 20
@@ -134,7 +146,7 @@ function EntityESP.new(player)
     self.label.Text = ""
     self.label.Size = Settings.textSize
     self.label.Color = WHITE_COLOR
-    self.label.Font = Settings.font
+    self.label.Font = getFont(Settings.font)
     
     -- Box
     self.box = Drawing.new("Quad")
@@ -231,6 +243,7 @@ function EntityESP:setFont(fontNameOrIndex)
     else
         Settings.font = fontNameOrIndex or DEFAULT_FONT
     end
+    -- Font will be applied on next update cycle via getFont()
 end
 
 function EntityESP:setTextSize(size)
@@ -445,7 +458,7 @@ function EntityESP:update()
         self.label.Text = labelText
         self.label.Color = textColor
         self.label.Size = Settings.textSize
-        self.label.Font = Settings.font
+        self.label.Font = getFont(Settings.font)
     else
         self.label.Visible = false
     end
@@ -624,6 +637,15 @@ Players.PlayerRemoving:Connect(onPlayerRemoving)
 RunService:BindToRenderStep(uniqueId, Enum.RenderPriority.Camera.Value, updateCamera)
 RunService:BindToRenderStep(uniqueId .. "_update", Enum.RenderPriority.Camera.Value + 1, updateAll)
 
-print("[dxe] ESP Module Loaded")
+-- Use dxe print if available, otherwise use regular print with prefix
+local function dxePrint(...)
+    if shared.dxe and shared.dxe.print then
+        shared.dxe.print(...)
+    else
+        print("[dxe]", ...)
+    end
+end
+
+dxePrint("ESP Module Loaded")
 
 return EntityESP
