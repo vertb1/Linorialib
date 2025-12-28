@@ -17,7 +17,7 @@ local HEADER_HEIGHT = 26
 local WINDOW_WIDTH = 600
 local WINDOW_HEIGHT = 480
 local BLACK_OUTLINE = Color3.new(0, 0, 0)
-local MAX_HITBOX_TIME = 0.5 -- Snapshot duration (doesn't follow entity)
+local MAX_HITBOX_TIME = 1.0 -- Snapshot duration (doesn't follow entity) - increased for visibility
 local DEFAULT_HITBOX_SIZE = Vector3.new(6, 6, 8)
 
 -- Animation path for this game
@@ -45,6 +45,8 @@ local MOVEMENT_NAMES = {
     -- NPC specific animations to filter
     "smith", "smithing", "forge", "forging", "anvil",
     "fly", "flying", "hover", "hovering", "glide", "gliding", "soar",
+    -- Animation metadata/blend names to filter
+    "weight", "blend", "additive", "layer", "mask",
 }
 
 -- TRUE PARRY animation patterns (only these = successful parry)
@@ -618,13 +620,98 @@ local function copyToClipboard(text)
     return false
 end
 
+-- Attack type detection patterns for accurate hitbox sizing
+local ATTACK_TYPE_PATTERNS = {
+    -- Long range attacks (spears, halberds, staves, ranged)
+    longRange = {
+        patterns = {"spear", "halberd", "polearm", "lance", "pike", "staff", "range", "thrust", "lunge", "stab", "poke", "jab", "extend", "reach"},
+        size = Vector3.new(5, 5, 16), -- Long and narrow
+        offset = Vector3.new(0, 0, -10),
+    },
+    -- Heavy/big attacks (greatswords, hammers, axes)
+    heavy = {
+        patterns = {"heavy", "great", "smash", "slam", "crush", "overhead", "downward", "ground", "aoe", "spin", "whirl", "cleave", "wide", "sweep"},
+        size = Vector3.new(12, 8, 12), -- Wide area
+        offset = Vector3.new(0, 0, -6),
+    },
+    -- Uppercut/vertical attacks
+    uppercut = {
+        patterns = {"upper", "rising", "upward", "lift", "launch", "sky", "air"},
+        size = Vector3.new(5, 12, 6), -- Tall
+        offset = Vector3.new(0, 3, -4),
+    },
+    -- Dash/charge attacks
+    dash = {
+        patterns = {"dash", "charge", "rush", "tackle", "barge", "lunge", "sprint"},
+        size = Vector3.new(6, 6, 14), -- Long forward
+        offset = Vector3.new(0, 0, -8),
+    },
+    -- Kick attacks
+    kick = {
+        patterns = {"kick", "stomp", "leg", "foot"},
+        size = Vector3.new(4, 4, 6),
+        offset = Vector3.new(0, -1, -4),
+    },
+    -- Punch/fist attacks
+    punch = {
+        patterns = {"punch", "fist", "jab", "hook", "straight"},
+        size = Vector3.new(4, 4, 5),
+        offset = Vector3.new(0, 1, -3),
+    },
+    -- Combo finishers (usually bigger)
+    finisher = {
+        patterns = {"final", "finish", "end", "combo", "4", "5", "ender"},
+        size = Vector3.new(8, 7, 10),
+        offset = Vector3.new(0, 0, -6),
+    },
+    -- Default melee (sword, light attacks)
+    default = {
+        patterns = {},
+        size = Vector3.new(6, 6, 8),
+        offset = Vector3.new(0, 0, -5),
+    },
+}
+
+-- Determine attack type from animation name
+local function getAttackType(animName)
+    if not animName then return ATTACK_TYPE_PATTERNS.default end
+    local lowerName = animName:lower()
+    
+    -- Check each type (order matters - more specific first)
+    for typeName, typeData in pairs(ATTACK_TYPE_PATTERNS) do
+        if typeName ~= "default" then
+            for _, pattern in ipairs(typeData.patterns) do
+                if lowerName:find(pattern, 1, true) then
+                    return typeData
+                end
+            end
+        end
+    end
+    
+    -- Check for numbered attacks (M1, M2, etc. or 1, 2, 3, etc.)
+    local attackNum = lowerName:match("m?(%d)")
+    if attackNum then
+        local num = tonumber(attackNum)
+        if num and num >= 4 then
+            return ATTACK_TYPE_PATTERNS.finisher
+        end
+    end
+    
+    return ATTACK_TYPE_PATTERNS.default
+end
+
 -- Hitbox visualization functions (SNAPSHOT-BASED - doesn't follow entity)
-local function createHitboxVisualization(entity, color)
+local function createHitboxVisualization(entity, color, animName)
     if not (shared.dxe and shared.dxe.showHitboxes) then return nil end
     local root = entity:FindFirstChild("HumanoidRootPart")
     if not root then return nil end
     
-    -- Create snapshot hitbox at CURRENT position (won't follow)
+    -- Determine attack type for proper sizing
+    local attackType = getAttackType(animName)
+    local hitboxSize = attackType.size
+    local hitboxOffset = attackType.offset
+    
+    -- Create snapshot hitbox IMMEDIATELY at CURRENT position (won't follow)
     local hitbox = Instance.new("Part")
     hitbox.Name = "AnimLoggerHitbox_Snapshot"
     hitbox.Anchored = true
@@ -633,19 +720,21 @@ local function createHitboxVisualization(entity, color)
     hitbox.CanTouch = false
     hitbox.Material = Enum.Material.ForceField
     hitbox.CastShadow = false
-    hitbox.Size = DEFAULT_HITBOX_SIZE
-    hitbox.Transparency = 0.6
+    hitbox.Size = hitboxSize
+    hitbox.Transparency = 0.5
     hitbox.Color = color or Color3.fromRGB(255, 50, 50)
     hitbox.Shape = Enum.PartType.Block
-    -- Snapshot position - in front of entity at time of creation
-    hitbox.CFrame = root.CFrame * CFrame.new(0, 0, -(DEFAULT_HITBOX_SIZE.Z / 2))
+    
+    -- Snapshot position - based on attack type offset
+    hitbox.CFrame = root.CFrame * CFrame.new(hitboxOffset)
     hitbox.Parent = workspace
     
-    -- Fade out effect
-    task.delay(MAX_HITBOX_TIME * 0.6, function()
+    -- Fade out effect (longer duration for better visibility)
+    local displayTime = math.max(MAX_HITBOX_TIME, 0.8)
+    task.delay(displayTime * 0.7, function()
         if hitbox and hitbox.Parent then
             local TweenService = game:GetService("TweenService")
-            local fadeTime = MAX_HITBOX_TIME * 0.4
+            local fadeTime = displayTime * 0.3
             local tween = TweenService:Create(hitbox, TweenInfo.new(fadeTime), { Transparency = 1 })
             tween:Play()
             tween.Completed:Wait()
@@ -1064,8 +1153,8 @@ local function onAnimationPlayed(animator, track)
     -- Record initial speed
     pbdata:astrack(track.Speed)
     
-    -- Create hitbox visualization if enabled
-    local hitbox = createHitboxVisualization(entity, Color3.fromRGB(255, 50, 50))
+    -- Create hitbox visualization if enabled (pass animName for proper sizing)
+    local hitbox = createHitboxVisualization(entity, Color3.fromRGB(255, 50, 50), animName)
     if hitbox then
         activeHitboxes[track] = hitbox
     end
