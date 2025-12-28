@@ -7,7 +7,7 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
 -- Constants
-local DEFAULT_FONT = 3
+local DEFAULT_FONT = 3 -- Drawing.Font: 0=UI, 1=System, 2=Plex, 3=Monospace (Code)
 local DEFAULT_TEXT_SIZE = 13
 local DEFAULT_MAX_DISTANCE = 1000
 local DEFAULT_PROXIMITY_DISTANCE = 100
@@ -111,7 +111,7 @@ function EntityESP.new(player)
     self.triangle.Color = WHITE_COLOR
     self.triangle.Filled = true
     
-    -- Label
+    -- Label (using monospace/code font for clean look)
     self.label = Drawing.new("Text")
     self.label.Visible = false
     self.label.Center = true
@@ -119,7 +119,7 @@ function EntityESP.new(player)
     self.label.Text = ""
     self.label.Size = Settings.textSize
     self.label.Color = WHITE_COLOR
-    self.label.Font = DEFAULT_FONT
+    self.label.Font = 3 -- Monospace/Code font
     
     -- Box
     self.box = Drawing.new("Quad")
