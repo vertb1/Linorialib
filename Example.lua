@@ -2,28 +2,11 @@
 shared.dxe = shared.dxe or {}
 shared.dxe.silent = true -- Start with notifications disabled by default
 
--- ============================================
--- CONSOLE FILTER - Block ALL game output
--- ============================================
-local originalPrint = print
-local originalWarn = warn
-local filterConsole = true -- Set to false to see all output
-
--- Our own print function that always works
-local function dxePrint(...)
-    originalPrint("[dxe]", ...)
-end
-
-local function dxeWarn(...)
-    originalWarn("[dxe]", ...)
-end
-
--- Check if we have executor functions available
-if hookfunction or replaceclosure then
-    local hook = hookfunction or replaceclosure
-    
-    -- Our allowed prefixes
-    local allowedPrefixes = {
+local ConsoleFilter = {
+    enabled = true,
+    origPrint = print,
+    origWarn = warn,
+    prefixes = {
         "[dxe]",
         "[AnimLogger]",
         "[AutoDefense]",
@@ -32,65 +15,73 @@ if hookfunction or replaceclosure then
         "[Defense]",
         "[KeyHandler]",
     }
-    
-    local function isOurOutput(firstArg)
-        if type(firstArg) ~= "string" then return false end
-        for _, prefix in ipairs(allowedPrefixes) do
-            if firstArg:sub(1, #prefix) == prefix then
-                return true
-            end
+}
+
+local function isOurOutput(firstArg)
+    if type(firstArg) ~= "string" then return false end
+    for _, prefix in ipairs(ConsoleFilter.prefixes) do
+        if firstArg:sub(1, #prefix) == prefix then
+            return true
         end
-        return false
     end
+    return false
+end
+
+-- Check if we have executor functions available
+if hookfunction or replaceclosure then
+    local hook = hookfunction or replaceclosure
     
-    -- Hook print to block everything except our calls
-    local newPrint = hook(print, function(...)
-        if not filterConsole then
-            return originalPrint(...)
+    -- Hook print - store original in table to avoid closure issues
+    ConsoleFilter.origPrint = hook(print, function(...)
+        if not ConsoleFilter.enabled then
+            return ConsoleFilter.origPrint(...)
         end
         
-        -- Check if first arg starts with our prefixes
         local firstArg = select(1, ...)
         if isOurOutput(firstArg) then
-            return originalPrint(...)
+            return ConsoleFilter.origPrint(...)
         end
         
-        -- Use checkcaller if available (executor-level check)
         if checkcaller and checkcaller() then
-            return originalPrint("[dxe]", ...)
+            return ConsoleFilter.origPrint("[dxe]", ...)
         end
         
-        -- Block everything else (game spam)
         return nil
     end)
     
-    -- Hook warn to block everything except our calls  
-    local newWarn = hook(warn, function(...)
-        if not filterConsole then
-            return originalWarn(...)
+    -- Hook warn
+    ConsoleFilter.origWarn = hook(warn, function(...)
+        if not ConsoleFilter.enabled then
+            return ConsoleFilter.origWarn(...)
         end
         
-        -- Check if first arg starts with our prefixes
         local firstArg = select(1, ...)
         if isOurOutput(firstArg) then
-            return originalWarn(...)
+            return ConsoleFilter.origWarn(...)
         end
         
-        -- Use checkcaller if available
         if checkcaller and checkcaller() then
-            return originalWarn("[dxe]", ...)
+            return ConsoleFilter.origWarn("[dxe]", ...)
         end
         
-        -- Block everything else
         return nil
     end)
     
-    dxePrint("Console filter enabled - blocking game output")
+    ConsoleFilter.origPrint("[dxe] Console filter enabled - blocking game output")
+end
+
+-- Our own print function that always works
+local function dxePrint(...)
+    ConsoleFilter.origPrint("[dxe]", ...)
+end
+
+local function dxeWarn(...)
+    ConsoleFilter.origWarn("[dxe]", ...)
 end
 
 -- Store references for toggling and use
 shared.dxe.filterConsole = function(enabled)
-    filterConsole = enabled
+    ConsoleFilter.enabled = enabled
     if enabled then
         dxePrint("Console filter enabled")
     else
@@ -99,8 +90,28 @@ shared.dxe.filterConsole = function(enabled)
 end
 shared.dxe.print = dxePrint
 shared.dxe.warn = dxeWarn
-shared.dxe.originalPrint = originalPrint
-shared.dxe.originalWarn = originalWarn
+shared.dxe.originalPrint = ConsoleFilter.origPrint
+shared.dxe.originalWarn = ConsoleFilter.origWarn
+
+shared.dxe.espFont = 3 -- Default to Monospace
+shared.dxe.trackedTextObjects = setmetatable({}, {__mode = "v"})
+
+if Drawing and Drawing.new then
+    local originalDrawingNew = Drawing.new
+    Drawing.new = function(objectType)
+        local obj = originalDrawingNew(objectType)
+        if objectType == "Text" then
+            -- Apply current font setting
+            pcall(function()
+                obj.Font = shared.dxe.espFont or 3
+            end)
+            -- Track it for later updates
+            table.insert(shared.dxe.trackedTextObjects, obj)
+        end
+        return obj
+    end
+    dxePrint("Drawing.new hook installed for ESP fonts")
+end
 
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/Library.lua"))()
 local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/ThemeManager.lua"))()
@@ -493,13 +504,76 @@ ESPGroupBox:AddLabel('Enemy Color'):AddColorPicker('ESPEnemyColor', {
 
 -- ESP Settings Callbacks
 if ESP and ESP.Settings then
-    -- Font map for dropdown
+    -- Font map for dropdown (Drawing.Fonts enum values)
     local fontMap = ESP.FontMap or {
         ["UI"] = 0,
         ["System"] = 1,
         ["Plex"] = 2,
         ["Monospace"] = 3,
     }
+    
+    -- Function to update font on all tracked text objects
+    local function updateAllESPFonts(fontIndex)
+        shared.dxe.espFont = fontIndex
+        
+        -- Update settings
+        ESP.Settings.font = fontIndex
+        if ESP.Settings.Font then ESP.Settings.Font = fontIndex end
+        
+        -- Update all tracked text objects from the hook
+        local trackedTextObjects = shared.dxe.trackedTextObjects or {}
+        for i = #trackedTextObjects, 1, -1 do
+            local obj = trackedTextObjects[i]
+            if obj then
+                local success = pcall(function()
+                    obj.Font = fontIndex
+                end)
+                if not success then
+                    table.remove(trackedTextObjects, i)
+                end
+            else
+                table.remove(trackedTextObjects, i)
+            end
+        end
+        
+        -- Also try ESP internal tables
+        local instanceTables = {
+            ESP.instances,
+            ESP._instances, 
+            ESP.Objects,
+            ESP.objects,
+            ESP.Players,
+            ESP.players,
+        }
+        
+        for _, instances in pairs(instanceTables) do
+            if type(instances) == "table" then
+                for _, espObj in pairs(instances) do
+                    if type(espObj) == "table" then
+                        for key, value in pairs(espObj) do
+                            if type(value) == "userdata" then
+                                pcall(function()
+                                    value.Font = fontIndex
+                                end)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Store for use in callbacks
+    shared.dxe.updateESPFonts = updateAllESPFonts
+    
+    -- Continuously update fonts (for newly created ESP instances)
+    task.spawn(function()
+        while task.wait(0.5) do
+            if ESP and ESP.Settings and ESP.Settings.enabled then
+                updateAllESPFonts(shared.dxe.espFont or 3)
+            end
+        end
+    end)
     
     Toggles.ESPEnabled:OnChanged(function()
         ESP.Settings.enabled = Toggles.ESPEnabled.Value
@@ -566,9 +640,16 @@ if ESP and ESP.Settings then
         local fontIndex = fontMap[fontName] or 3
         ESP.Settings.fontName = fontName
         ESP.Settings.font = fontIndex
+        shared.dxe.espFont = fontIndex
+        -- Update all ESP instances directly
+        updateAllESPFonts(fontIndex)
         -- Also try calling setFont method if it exists
         if ESP.setFont then
-            ESP:setFont(fontIndex)
+            pcall(function() ESP:setFont(fontIndex) end)
+        end
+        -- Debug notification
+        if shared.dxe and shared.dxe.print then
+            shared.dxe.print("ESP Font changed to:", fontName, "(", fontIndex, ")")
         end
     end)
     
@@ -691,6 +772,56 @@ FallbackGroupBox:AddSlider('AutoDefenseMaxMs', {
     Tooltip = 'Maximum time into animation to parry'
 })
 
+-- Ping Compensation Settings (Lycoris-style)
+local PingGroupBox = Tabs.Combat:AddRightGroupbox('Ping Compensation')
+
+PingGroupBox:AddToggle('AutoDefenseAutoPing', {
+    Text = 'Auto Ping Compensation',
+    Default = true,
+    Tooltip = 'Automatically adjust parry timing based on network latency'
+})
+
+PingGroupBox:AddSlider('AutoDefensePingMultiplier', {
+    Text = 'Ping Multiplier',
+    Default = 100,
+    Min = 0,
+    Max = 200,
+    Rounding = 0,
+    Suffix = '%',
+    Tooltip = 'How much of one-way latency to compensate (100% = full compensation)'
+})
+
+PingGroupBox:AddSlider('AutoDefenseMaxPingComp', {
+    Text = 'Max Ping Compensation',
+    Default = 150,
+    Min = 0,
+    Max = 300,
+    Rounding = 0,
+    Suffix = 'ms',
+    Tooltip = 'Maximum ping compensation in milliseconds'
+})
+
+PingGroupBox:AddLabel('Current Ping: --ms'):SetText('Current Ping: --ms')
+
+-- M1 Block Settings
+local M1BlockGroupBox = Tabs.Combat:AddRightGroupbox('M1 Block')
+
+M1BlockGroupBox:AddToggle('AutoDefenseBlockM1', {
+    Text = 'Block M1 During Attack',
+    Default = false,
+    Tooltip = 'Prevent M1 input when enemy attack is detected'
+})
+
+M1BlockGroupBox:AddSlider('AutoDefenseM1BlockDuration', {
+    Text = 'M1 Block Duration',
+    Default = 300,
+    Min = 100,
+    Max = 1000,
+    Rounding = 0,
+    Suffix = 'ms',
+    Tooltip = 'How long to block M1 input after detecting attack'
+})
+
 -- Auto Defense Callbacks
 if AutoDefense then
     AutoDefense.init(Library, AnimationLogger)
@@ -741,6 +872,47 @@ if AutoDefense then
     
     Options.AutoDefenseMaxMs:OnChanged(function()
         AutoDefense.Settings.maxParryMs = Options.AutoDefenseMaxMs.Value
+    end)
+    
+    -- Ping Compensation Callbacks
+    Toggles.AutoDefenseAutoPing:OnChanged(function()
+        AutoDefense.Settings.autoPingCompensation = Toggles.AutoDefenseAutoPing.Value
+    end)
+    
+    Options.AutoDefensePingMultiplier:OnChanged(function()
+        AutoDefense.Settings.pingMultiplier = Options.AutoDefensePingMultiplier.Value / 100
+    end)
+    
+    Options.AutoDefenseMaxPingComp:OnChanged(function()
+        AutoDefense.Settings.maxPingCompensation = Options.AutoDefenseMaxPingComp.Value
+    end)
+    
+    -- M1 Block Callbacks
+    Toggles.AutoDefenseBlockM1:OnChanged(function()
+        AutoDefense.Settings.blockM1 = Toggles.AutoDefenseBlockM1.Value
+    end)
+    
+    Options.AutoDefenseM1BlockDuration:OnChanged(function()
+        AutoDefense.Settings.m1BlockDuration = Options.AutoDefenseM1BlockDuration.Value / 1000
+    end)
+    
+    -- Ping display update loop
+    task.spawn(function()
+        while task.wait(1) do
+            if AutoDefense.getLatencyInfo then
+                local info = AutoDefense.getLatencyInfo()
+                local label = PingGroupBox:FindChild("Label") -- Try to update label
+                if info then
+                    local pingText = string.format("Ping: %dms | Comp: %dms", 
+                        math.floor(info.ping or 0), 
+                        math.floor(info.compensation or 0))
+                    -- Debug print the ping info
+                    if AutoDefense.debugMode and shared.dxe and shared.dxe.print then
+                        shared.dxe.print("[AutoDefense] " .. pingText)
+                    end
+                end
+            end
+        end
     end)
 end
 
@@ -963,6 +1135,13 @@ task.defer(function()
         ESP.Settings.textSize = Options.ESPTextSize.Value
         ESP.Settings.fontName = Options.ESPFont.Value
         ESP.Settings.font = fontMap[Options.ESPFont.Value] or 3
+        -- Update the global font setting and all ESP instances
+        if shared.dxe then
+            shared.dxe.espFont = fontMap[Options.ESPFont.Value] or 3
+            if shared.dxe.updateESPFonts then
+                shared.dxe.updateESPFonts(fontMap[Options.ESPFont.Value] or 3)
+            end
+        end
         ESP.Settings.useTeamColors = Toggles.ESPTeamColors.Value
         ESP.Settings.nameColor = Options.ESPNameColor.Value
         ESP.Settings.allyColor = Options.ESPAllyColor.Value
@@ -981,6 +1160,15 @@ task.defer(function()
         AutoDefense.Settings.fallbackParryPercent = Options.AutoDefenseFallbackPercent.Value / 100
         AutoDefense.Settings.minParryMs = Options.AutoDefenseMinMs.Value
         AutoDefense.Settings.maxParryMs = Options.AutoDefenseMaxMs.Value
+        
+        -- Ping compensation settings
+        AutoDefense.Settings.autoPingCompensation = Toggles.AutoDefenseAutoPing.Value
+        AutoDefense.Settings.pingMultiplier = Options.AutoDefensePingMultiplier.Value / 100
+        AutoDefense.Settings.maxPingCompensation = Options.AutoDefenseMaxPingComp.Value
+        
+        -- M1 Block settings
+        AutoDefense.Settings.blockM1 = Toggles.AutoDefenseBlockM1.Value
+        AutoDefense.Settings.m1BlockDuration = Options.AutoDefenseM1BlockDuration.Value / 1000
         
         -- Start if enabled
         if Toggles.AutoDefenseEnabled.Value then
