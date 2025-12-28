@@ -66,12 +66,17 @@ LeftGroupBox:AddToggle('MyToggle', {
 -- To get the state of the toggle you do toggle.Value
 
 -- Calls the passed function when the toggle is updated
-Toggles.MyToggle:OnChanged(function()
-    -- Add your logic here
+-- Use task.defer to ensure toggle is fully registered before attaching callback
+task.defer(function()
+    if Toggles.MyToggle then
+        Toggles.MyToggle:OnChanged(function()
+            -- Add your logic here
+        end)
+        
+        -- This should print to the console: "My toggle state changed! New value: false"
+        Toggles.MyToggle:SetValue(false)
+    end
 end)
-
--- This should print to the console: "My toggle state changed! New value: false"
-Toggles.MyToggle:SetValue(false)
 
 -- 1/15/23
 -- Deprecated old way of creating buttons in favor of using a table
@@ -161,13 +166,8 @@ LeftGroupBox:AddSlider('MySlider', {
 -- You index Options with the specified index, in this case it is 'MySlider'
 -- To get the value of the slider you do slider.Value
 
-local Number = Options.MySlider.Value
-Options.MySlider:OnChanged(function()
-    -- Add your logic here
-end)
-
--- This should print to the console: "MySlider was changed! New value: 3"
-Options.MySlider:SetValue(3)
+-- Note: Access Options after they're registered
+-- local Number = Options.MySlider.Value
 
 -- Groupbox:AddInput
 -- Arguments: Idx, Info
@@ -183,9 +183,7 @@ LeftGroupBox:AddInput('MyTextbox', {
     -- MaxLength is also an option which is the max length of the text
 })
 
-Options.MyTextbox:OnChanged(function()
-    -- Add your logic here
-end)
+-- Callbacks will be set up in the deferred block below
 
 -- Groupbox:AddDropdown
 -- Arguments: Idx, Info
@@ -199,11 +197,7 @@ LeftGroupBox:AddDropdown('MyDropdown', {
     Tooltip = 'This is a tooltip', -- Information shown when you hover over the dropdown
 })
 
-Options.MyDropdown:OnChanged(function()
-    -- Add your logic here
-end)
-
-Options.MyDropdown:SetValue('This')
+-- Callbacks will be set up in the deferred block below
 
 -- Multi dropdowns
 LeftGroupBox:AddDropdown('MyMultiDropdown', {
@@ -220,14 +214,7 @@ LeftGroupBox:AddDropdown('MyMultiDropdown', {
     Tooltip = 'This is a tooltip', -- Information shown when you hover over the dropdown
 })
 
-Options.MyMultiDropdown:OnChanged(function()
-    -- Add your logic here
-end)
-
-Options.MyMultiDropdown:SetValue({
-    This = true,
-    is = true,
-})
+-- Callbacks will be set up in the deferred block below
 
 LeftGroupBox:AddDropdown('MyPlayerDropdown', {
     SpecialType = 'Player',
@@ -246,11 +233,7 @@ LeftGroupBox:AddLabel('Color'):AddColorPicker('ColorPicker', {
     Transparency = 0, -- Optional. Enables transparency changing for this color picker (leave as nil to disable)
 })
 
-Options.ColorPicker:OnChanged(function()
-    -- Add your logic here
-end)
-
-Options.ColorPicker:SetValueRGB(Color3.fromRGB(0, 255, 140))
+-- Callbacks will be set up in the deferred block below
 
 -- Label:AddKeyPicker
 -- Arguments: Idx, Info
@@ -275,15 +258,7 @@ LeftGroupBox:AddLabel('Keybind'):AddKeyPicker('KeyPicker', {
 
 -- OnClick is only fired when you press the keybind and the mode is Toggle
 -- Otherwise, you will have to use Keybind:GetState()
-Options.KeyPicker:OnClick(function()
-    -- Add your logic here
-end)
-
-Options.KeyPicker:OnChanged(function()
-    -- Add your logic here
-end)
-
-Options.KeyPicker:SetValue({ 'MB2', 'Toggle' }) -- Sets keybind to MB2, mode to Hold
+-- Callbacks will be set up in the deferred block below
 
 -- Long text label to demonstrate UI scrolling behaviour.
 local LeftGroupBox2 = Tabs.Main:AddLeftGroupbox('Groupbox #2');
@@ -815,18 +790,9 @@ task.defer(function()
     
     -- Apply AnimationLogger settings
     if AnimationLogger then
-        if AnimationLogger.setMaxDistance then
-            AnimationLogger.setMaxDistance(Options.AnimLoggerDistance.Value)
-        end
-        if AnimationLogger.setVisible then
-            AnimationLogger.setVisible(Toggles.AnimLoggerVisible.Value)
-        end
-        if AnimationLogger.setFilter then
-            if Toggles.AnimLoggerNPCsOnly.Value then
-                AnimationLogger.setFilter("npc")
-            elseif Toggles.AnimLoggerPlayersOnly.Value then
-                AnimationLogger.setFilter("player")
-            end
+        -- Use AnimLoggerToggle for visibility (that's the actual toggle name)
+        if AnimationLogger.visible and Toggles.AnimLoggerToggle then
+            AnimationLogger.visible(Toggles.AnimLoggerToggle.Value)
         end
     end
 end)
