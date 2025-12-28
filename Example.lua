@@ -3,77 +3,104 @@ shared.dxe = shared.dxe or {}
 shared.dxe.silent = true -- Start with notifications disabled by default
 
 -- ============================================
--- CONSOLE FILTER - Only show our script output
+-- CONSOLE FILTER - Block ALL game output
 -- ============================================
-local oldPrint = print
-local oldWarn = warn
+local originalPrint = print
+local originalWarn = warn
 local filterConsole = true -- Set to false to see all output
 
-local function isOurScript()
-    -- Check if the caller is from our executor script (not game code)
-    local info = debug.info(3, "s") -- Get source of caller's caller
-    if not info then return true end -- If can't determine, allow it
-    
-    -- Game scripts have sources like "Players.X.PlayerScripts..." or "ServerScriptService..."
-    -- Our scripts typically have "[string" or are from executor
-    local isGameScript = info:match("^Players") or 
-                         info:match("^ServerScriptService") or 
-                         info:match("^ReplicatedStorage") or
-                         info:match("^StarterPlayer") or
-                         info:match("^Workspace") or
-                         info:match("^game")
-    
-    return not isGameScript
+-- Our own print function that always works
+local function dxePrint(...)
+    originalPrint("[dxe]", ...)
+end
+
+local function dxeWarn(...)
+    originalWarn("[dxe]", ...)
 end
 
 -- Check if we have executor functions available
 if hookfunction or replaceclosure then
     local hook = hookfunction or replaceclosure
     
-    oldPrint = hook(print, function(...)
+    -- Our allowed prefixes
+    local allowedPrefixes = {
+        "[dxe]",
+        "[AnimLogger]",
+        "[AutoDefense]",
+        "[ESP",
+        "[Hitbox",
+        "[Defense]",
+        "[KeyHandler]",
+    }
+    
+    local function isOurOutput(firstArg)
+        if type(firstArg) ~= "string" then return false end
+        for _, prefix in ipairs(allowedPrefixes) do
+            if firstArg:sub(1, #prefix) == prefix then
+                return true
+            end
+        end
+        return false
+    end
+    
+    -- Hook print to block everything except our calls
+    local newPrint = hook(print, function(...)
         if not filterConsole then
-            return oldPrint(...)
+            return originalPrint(...)
         end
         
-        -- Always allow if checkcaller says it's us
+        -- Check if first arg starts with our prefixes
+        local firstArg = select(1, ...)
+        if isOurOutput(firstArg) then
+            return originalPrint(...)
+        end
+        
+        -- Use checkcaller if available (executor-level check)
         if checkcaller and checkcaller() then
-            return oldPrint("[dxe]", ...)
+            return originalPrint("[dxe]", ...)
         end
         
-        -- Check source
-        if isOurScript() then
-            return oldPrint("[dxe]", ...)
-        end
-        
-        -- Block game output
+        -- Block everything else (game spam)
         return nil
     end)
     
-    oldWarn = hook(warn, function(...)
+    -- Hook warn to block everything except our calls  
+    local newWarn = hook(warn, function(...)
         if not filterConsole then
-            return oldWarn(...)
+            return originalWarn(...)
         end
         
+        -- Check if first arg starts with our prefixes
+        local firstArg = select(1, ...)
+        if isOurOutput(firstArg) then
+            return originalWarn(...)
+        end
+        
+        -- Use checkcaller if available
         if checkcaller and checkcaller() then
-            return oldWarn("[dxe]", ...)
+            return originalWarn("[dxe]", ...)
         end
         
-        if isOurScript() then
-            return oldWarn("[dxe]", ...)
-        end
-        
+        -- Block everything else
         return nil
     end)
     
-    print("Console filter enabled - only showing dxe output")
+    dxePrint("Console filter enabled - blocking game output")
 end
 
--- Store references for toggling
+-- Store references for toggling and use
 shared.dxe.filterConsole = function(enabled)
     filterConsole = enabled
+    if enabled then
+        dxePrint("Console filter enabled")
+    else
+        dxePrint("Console filter disabled - showing all output")
+    end
 end
-shared.dxe.oldPrint = oldPrint
-shared.dxe.oldWarn = oldWarn
+shared.dxe.print = dxePrint
+shared.dxe.warn = dxeWarn
+shared.dxe.originalPrint = originalPrint
+shared.dxe.originalWarn = originalWarn
 
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/Library.lua"))()
 local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/ThemeManager.lua"))()
@@ -536,8 +563,13 @@ if ESP and ESP.Settings then
     
     Options.ESPFont:OnChanged(function()
         local fontName = Options.ESPFont.Value
+        local fontIndex = fontMap[fontName] or 3
         ESP.Settings.fontName = fontName
-        ESP.Settings.font = fontMap[fontName] or 3
+        ESP.Settings.font = fontIndex
+        -- Also try calling setFont method if it exists
+        if ESP.setFont then
+            ESP:setFont(fontIndex)
+        end
     end)
     
     Toggles.ESPTeamColors:OnChanged(function()
