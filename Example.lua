@@ -2,6 +2,79 @@
 shared.dxe = shared.dxe or {}
 shared.dxe.silent = true -- Start with notifications disabled by default
 
+-- ============================================
+-- CONSOLE FILTER - Only show our script output
+-- ============================================
+local oldPrint = print
+local oldWarn = warn
+local filterConsole = true -- Set to false to see all output
+
+local function isOurScript()
+    -- Check if the caller is from our executor script (not game code)
+    local info = debug.info(3, "s") -- Get source of caller's caller
+    if not info then return true end -- If can't determine, allow it
+    
+    -- Game scripts have sources like "Players.X.PlayerScripts..." or "ServerScriptService..."
+    -- Our scripts typically have "[string" or are from executor
+    local isGameScript = info:match("^Players") or 
+                         info:match("^ServerScriptService") or 
+                         info:match("^ReplicatedStorage") or
+                         info:match("^StarterPlayer") or
+                         info:match("^Workspace") or
+                         info:match("^game")
+    
+    return not isGameScript
+end
+
+-- Check if we have executor functions available
+if hookfunction or replaceclosure then
+    local hook = hookfunction or replaceclosure
+    
+    oldPrint = hook(print, function(...)
+        if not filterConsole then
+            return oldPrint(...)
+        end
+        
+        -- Always allow if checkcaller says it's us
+        if checkcaller and checkcaller() then
+            return oldPrint("[dxe]", ...)
+        end
+        
+        -- Check source
+        if isOurScript() then
+            return oldPrint("[dxe]", ...)
+        end
+        
+        -- Block game output
+        return nil
+    end)
+    
+    oldWarn = hook(warn, function(...)
+        if not filterConsole then
+            return oldWarn(...)
+        end
+        
+        if checkcaller and checkcaller() then
+            return oldWarn("[dxe]", ...)
+        end
+        
+        if isOurScript() then
+            return oldWarn("[dxe]", ...)
+        end
+        
+        return nil
+    end)
+    
+    print("Console filter enabled - only showing dxe output")
+end
+
+-- Store references for toggling
+shared.dxe.filterConsole = function(enabled)
+    filterConsole = enabled
+end
+shared.dxe.oldPrint = oldPrint
+shared.dxe.oldWarn = oldWarn
+
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/Library.lua"))()
 local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/ThemeManager.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/vertb1/Linorialib/refs/heads/main/SaveManager.lua"))()
@@ -303,10 +376,34 @@ ESPGroupBox:AddToggle('ESPLifeforceBar', {
     Tooltip = 'Show lifeforce/blood bars (red)'
 })
 
+ESPGroupBox:AddToggle('ESPShowName', {
+    Text = 'Show Names',
+    Default = true,
+    Tooltip = 'Show player names'
+})
+
 ESPGroupBox:AddToggle('ESPShowLevel', {
     Text = 'Show Level',
     Default = true,
     Tooltip = 'Show player level'
+})
+
+ESPGroupBox:AddToggle('ESPShowHealth', {
+    Text = 'Show Health',
+    Default = true,
+    Tooltip = 'Show health values (HP: 100/100)'
+})
+
+ESPGroupBox:AddToggle('ESPShowHealthPercent', {
+    Text = 'Show Health %',
+    Default = true,
+    Tooltip = 'Show health percentage'
+})
+
+ESPGroupBox:AddToggle('ESPShowDistance', {
+    Text = 'Show Distance',
+    Default = true,
+    Tooltip = 'Show distance in studs'
 })
 
 ESPGroupBox:AddToggle('ESPShowTeam', {
@@ -339,10 +436,22 @@ ESPGroupBox:AddSlider('ESPTextSize', {
     Compact = false,
 })
 
+ESPGroupBox:AddDropdown('ESPFont', {
+    Text = 'Font',
+    Default = 'Monospace',
+    Values = {'UI', 'System', 'Plex', 'Monospace'},
+    Tooltip = 'ESP text font'
+})
+
 ESPGroupBox:AddToggle('ESPTeamColors', {
     Text = 'Use Team Colors',
     Default = true,
     Tooltip = 'Different colors for allies/enemies (off = use enemy color for all)'
+})
+
+ESPGroupBox:AddLabel('Name/Text Color'):AddColorPicker('ESPNameColor', {
+    Default = Color3.fromRGB(255, 255, 255),
+    Title = 'Name/Text Color',
 })
 
 ESPGroupBox:AddLabel('Ally Color'):AddColorPicker('ESPAllyColor', {
@@ -357,8 +466,15 @@ ESPGroupBox:AddLabel('Enemy Color'):AddColorPicker('ESPEnemyColor', {
 
 -- ESP Settings Callbacks
 if ESP and ESP.Settings then
+    -- Font map for dropdown
+    local fontMap = ESP.FontMap or {
+        ["UI"] = 0,
+        ["System"] = 1,
+        ["Plex"] = 2,
+        ["Monospace"] = 3,
+    }
+    
     Toggles.ESPEnabled:OnChanged(function()
-        -- Toggle all ESP visibility via enabled setting
         ESP.Settings.enabled = Toggles.ESPEnabled.Value
     end)
     
@@ -382,8 +498,24 @@ if ESP and ESP.Settings then
         ESP.Settings.showLifeforceBar = Toggles.ESPLifeforceBar.Value
     end)
     
+    Toggles.ESPShowName:OnChanged(function()
+        ESP.Settings.showName = Toggles.ESPShowName.Value
+    end)
+    
     Toggles.ESPShowLevel:OnChanged(function()
         ESP.Settings.showLevel = Toggles.ESPShowLevel.Value
+    end)
+    
+    Toggles.ESPShowHealth:OnChanged(function()
+        ESP.Settings.showHealth = Toggles.ESPShowHealth.Value
+    end)
+    
+    Toggles.ESPShowHealthPercent:OnChanged(function()
+        ESP.Settings.showHealthPercent = Toggles.ESPShowHealthPercent.Value
+    end)
+    
+    Toggles.ESPShowDistance:OnChanged(function()
+        ESP.Settings.showDistance = Toggles.ESPShowDistance.Value
     end)
     
     Toggles.ESPShowTeam:OnChanged(function()
@@ -402,8 +534,18 @@ if ESP and ESP.Settings then
         ESP.Settings.textSize = Options.ESPTextSize.Value
     end)
     
+    Options.ESPFont:OnChanged(function()
+        local fontName = Options.ESPFont.Value
+        ESP.Settings.fontName = fontName
+        ESP.Settings.font = fontMap[fontName] or 3
+    end)
+    
     Toggles.ESPTeamColors:OnChanged(function()
         ESP.Settings.useTeamColors = Toggles.ESPTeamColors.Value
+    end)
+    
+    Options.ESPNameColor:OnChanged(function()
+        ESP.Settings.nameColor = Options.ESPNameColor.Value
     end)
     
     Options.ESPAllyColor:OnChanged(function()
@@ -729,6 +871,12 @@ ToolsGroup:AddToggle('ShowHitboxes', {
     Tooltip = 'Visualize attack hitboxes when animation logging'
 })
 
+ToolsGroup:AddToggle('FilterConsole', {
+    Text = 'Filter Console',
+    Default = true,
+    Tooltip = 'Only show dxe script output, hide game spam'
+})
+
 Toggles.AnimVisualizerToggle:OnChanged(function()
     AnimationVisualizer.visible(Toggles.AnimVisualizerToggle.Value)
 end)
@@ -745,6 +893,12 @@ Toggles.ShowHitboxes:OnChanged(function()
     shared.dxe.showHitboxes = Toggles.ShowHitboxes.Value
 end)
 
+Toggles.FilterConsole:OnChanged(function()
+    if shared.dxe.filterConsole then
+        shared.dxe.filterConsole(Toggles.FilterConsole.Value)
+    end
+end)
+
 -- Apply initial values (for autoload)
 task.defer(function()
     task.wait(0.5) -- Wait for config to load
@@ -753,18 +907,32 @@ task.defer(function()
     
     -- Apply ESP settings from loaded config
     if ESP and ESP.Settings then
+        local fontMap = ESP.FontMap or {
+            ["UI"] = 0,
+            ["System"] = 1,
+            ["Plex"] = 2,
+            ["Monospace"] = 3,
+        }
+        
         ESP.Settings.enabled = Toggles.ESPEnabled.Value
         ESP.Settings.showBoxes = Toggles.ESPBoxes.Value
         ESP.Settings.showTracers = Toggles.ESPTracers.Value
         ESP.Settings.showHealthBar = Toggles.ESPHealthBar.Value
         ESP.Settings.showPostureBar = Toggles.ESPPostureBar.Value
         ESP.Settings.showLifeforceBar = Toggles.ESPLifeforceBar.Value
+        ESP.Settings.showName = Toggles.ESPShowName.Value
         ESP.Settings.showLevel = Toggles.ESPShowLevel.Value
+        ESP.Settings.showHealth = Toggles.ESPShowHealth.Value
+        ESP.Settings.showHealthPercent = Toggles.ESPShowHealthPercent.Value
+        ESP.Settings.showDistance = Toggles.ESPShowDistance.Value
         ESP.Settings.showTeam = Toggles.ESPShowTeam.Value
         ESP.Settings.showProximityArrows = Toggles.ESPProximityArrows.Value
         ESP.Settings.maxDistance = Options.ESPMaxDistance.Value
         ESP.Settings.textSize = Options.ESPTextSize.Value
+        ESP.Settings.fontName = Options.ESPFont.Value
+        ESP.Settings.font = fontMap[Options.ESPFont.Value] or 3
         ESP.Settings.useTeamColors = Toggles.ESPTeamColors.Value
+        ESP.Settings.nameColor = Options.ESPNameColor.Value
         ESP.Settings.allyColor = Options.ESPAllyColor.Value
         ESP.Settings.enemyColor = Options.ESPEnemyColor.Value
     end
