@@ -11,14 +11,17 @@ local Debris = game:GetService("Debris")
 
 -- Constants
 local MAX_LOG_ENTRIES = 100
-local FONT_FACE = Font.new("rbxasset://fonts/families/RobotoMono.json")
+local FONT_FACE = Font.new("rbxasset://fonts/families/RobotoMono.json") -- Code/Monospace font
 local ROW_HEIGHT = 18
 local HEADER_HEIGHT = 26
 local WINDOW_WIDTH = 600
 local WINDOW_HEIGHT = 480
 local BLACK_OUTLINE = Color3.new(0, 0, 0)
-local MAX_HITBOX_TIME = 3.0
+local MAX_HITBOX_TIME = 0.5 -- Snapshot duration (doesn't follow entity)
 local DEFAULT_HITBOX_SIZE = Vector3.new(6, 6, 8)
+
+-- Animation path for this game
+local ANIMATION_PATH = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Animations")
 
 -- Movement animation names to ALWAYS filter (even if Action priority)
 local MOVEMENT_NAMES = {
@@ -180,6 +183,14 @@ local function formatAnimationId(animId)
     return id
 end
 
+-- Get game animations folder
+local function getGameAnimationsFolder()
+    local success, folder = pcall(function()
+        return ANIMATION_PATH
+    end)
+    return success and folder or nil
+end
+
 -- Try to get the real animation name from various sources
 local function getRealAnimationName(track, animId)
     local formattedId = formatAnimationId(animId)
@@ -193,17 +204,34 @@ local function getRealAnimationName(track, animId)
     
     -- If name is just "Animation" or empty, try to find better name
     if name == "Animation" or name == "" or name:match("^%d+$") then
-        -- Try to get from animation instance name in ReplicatedStorage
-        pcall(function()
-            for _, child in pairs(ReplicatedStorage:GetDescendants()) do
-                if child:IsA("Animation") and formatAnimationId(child.AnimationId) == formattedId then
-                    if child.Name ~= "Animation" and child.Name ~= "" then
-                        name = child.Name
-                        break
+        -- Try game's animation folder first (ReplicatedStorage.Assets.Animations)
+        local animFolder = getGameAnimationsFolder()
+        if animFolder then
+            pcall(function()
+                for _, child in pairs(animFolder:GetDescendants()) do
+                    if child:IsA("Animation") and formatAnimationId(child.AnimationId) == formattedId then
+                        if child.Name ~= "Animation" and child.Name ~= "" then
+                            name = child.Name
+                            return
+                        end
                     end
                 end
-            end
-        end)
+            end)
+        end
+        
+        -- Fallback: search all of ReplicatedStorage
+        if name == "Animation" or name == "" or name:match("^%d+$") then
+            pcall(function()
+                for _, child in pairs(ReplicatedStorage:GetDescendants()) do
+                    if child:IsA("Animation") and formatAnimationId(child.AnimationId) == formattedId then
+                        if child.Name ~= "Animation" and child.Name ~= "" then
+                            name = child.Name
+                            break
+                        end
+                    end
+                end
+            end)
+        end
     end
     
     -- Still no good name? Try the track name
@@ -430,14 +458,15 @@ local function copyToClipboard(text)
     return false
 end
 
--- Hitbox visualization functions
+-- Hitbox visualization functions (SNAPSHOT-BASED - doesn't follow entity)
 local function createHitboxVisualization(entity, color)
     if not (shared.dxe and shared.dxe.showHitboxes) then return nil end
     local root = entity:FindFirstChild("HumanoidRootPart")
     if not root then return nil end
     
+    -- Create snapshot hitbox at CURRENT position (won't follow)
     local hitbox = Instance.new("Part")
-    hitbox.Name = "AnimLoggerHitbox"
+    hitbox.Name = "AnimLoggerHitbox_Snapshot"
     hitbox.Anchored = true
     hitbox.CanCollide = false
     hitbox.CanQuery = false
@@ -448,17 +477,41 @@ local function createHitboxVisualization(entity, color)
     hitbox.Transparency = 0.6
     hitbox.Color = color or Color3.fromRGB(255, 50, 50)
     hitbox.Shape = Enum.PartType.Block
+    -- Snapshot position - in front of entity at time of creation
     hitbox.CFrame = root.CFrame * CFrame.new(0, 0, -(DEFAULT_HITBOX_SIZE.Z / 2))
     hitbox.Parent = workspace
-    Debris:AddItem(hitbox, MAX_HITBOX_TIME)
+    
+    -- Fade out effect
+    task.delay(MAX_HITBOX_TIME * 0.6, function()
+        if hitbox and hitbox.Parent then
+            local TweenService = game:GetService("TweenService")
+            local fadeTime = MAX_HITBOX_TIME * 0.4
+            local tween = TweenService:Create(hitbox, TweenInfo.new(fadeTime), { Transparency = 1 })
+            tween:Play()
+            tween.Completed:Wait()
+            if hitbox and hitbox.Parent then
+                hitbox:Destroy()
+            end
+        end
+    end)
+    
     return hitbox
 end
 
-local function updateHitboxPosition(hitbox, entity)
+-- No longer updates position - hitbox is a snapshot
+local function updateHitboxColor(hitbox, progress)
     if not hitbox or not hitbox.Parent then return end
-    local root = entity:FindFirstChild("HumanoidRootPart")
-    if not root then return end
-    hitbox.CFrame = root.CFrame * CFrame.new(0, 0, -(DEFAULT_HITBOX_SIZE.Z / 2))
+    -- Color based on animation progress (parry window detection)
+    if progress >= 0.35 and progress <= 0.65 then
+        -- Danger zone (likely parry window) - Yellow
+        hitbox.Color = Color3.fromRGB(255, 255, 0)
+    elseif progress > 0.65 then
+        -- Past danger zone - Green
+        hitbox.Color = Color3.fromRGB(100, 255, 100)
+    else
+        -- Before danger zone - Red
+        hitbox.Color = Color3.fromRGB(255, 50, 50)
+    end
 end
 
 local function cleanupHitbox(track)
@@ -965,23 +1018,11 @@ local function startLogging()
                 -- Track speed changes (Lycoris-style ash)
                 pbdata:astrack(track.Speed)
                 
-                -- Update hitbox position and color based on progress
+                -- Update hitbox color based on progress (position stays fixed - snapshot)
                 local hitbox = activeHitboxes[track]
-                if hitbox and hitbox.Parent and pbdata.entity then
-                    updateHitboxPosition(hitbox, pbdata.entity)
-                    
-                    -- Color based on animation progress (parry window detection)
+                if hitbox and hitbox.Parent then
                     local progress = track.TimePosition / track.Length
-                    if progress >= 0.35 and progress <= 0.65 then
-                        -- Danger zone (likely parry window) - Yellow
-                        hitbox.Color = Color3.fromRGB(255, 255, 0)
-                    elseif progress > 0.65 then
-                        -- Past danger zone - Green
-                        hitbox.Color = Color3.fromRGB(100, 255, 100)
-                    else
-                        -- Before danger zone - Red
-                        hitbox.Color = Color3.fromRGB(255, 50, 50)
-                    end
+                    updateHitboxColor(hitbox, progress)
                 end
             end
         end
