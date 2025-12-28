@@ -42,6 +42,9 @@ local MOVEMENT_NAMES = {
     "guard", "defend", "deflect", "counter", "riposte",
     -- Rest/idle animations
     "rest", "rest1", "rest2", "rest3", "rest4",
+    -- NPC specific animations to filter
+    "smith", "smithing", "forge", "forging", "anvil",
+    "fly", "flying", "hover", "hovering", "glide", "gliding", "soar",
 }
 
 -- TRUE PARRY animation patterns (only these = successful parry)
