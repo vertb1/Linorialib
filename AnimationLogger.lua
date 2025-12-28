@@ -276,6 +276,7 @@ end
 
 -- Filesystem functions for saving/loading parry timings
 local EXPORT_FOLDER = "dxe/timings"
+local currentConfigName = nil -- Track current loaded config
 
 local function ensureFolder()
     if not isfolder then return false end
@@ -288,6 +289,146 @@ local function ensureFolder()
     return isfolder(EXPORT_FOLDER)
 end
 
+-- List all config files in the timings folder
+local function listConfigs()
+    if not listfiles or not ensureFolder() then return {} end
+    
+    local configs = {}
+    local success, files = pcall(function()
+        return listfiles(EXPORT_FOLDER)
+    end)
+    
+    if success and files then
+        for _, file in ipairs(files) do
+            if file:sub(-5) == ".json" then
+                -- Extract just the filename without path and extension
+                local name = file:match("([^/\\]+)%.json$")
+                if name and name ~= "parry_timings" then -- Skip old combined file
+                    table.insert(configs, name)
+                end
+            end
+        end
+    end
+    
+    -- Sort alphabetically
+    table.sort(configs)
+    return configs
+end
+
+-- Get next available config number (swin1, swin2, etc.)
+local function getNextConfigName(prefix)
+    prefix = prefix or "swin"
+    local configs = listConfigs()
+    local maxNum = 0
+    
+    for _, name in ipairs(configs) do
+        local num = name:match("^" .. prefix .. "(%d+)$")
+        if num then
+            maxNum = math.max(maxNum, tonumber(num))
+        end
+    end
+    
+    return prefix .. (maxNum + 1)
+end
+
+-- Save to a named config file
+local function saveNamedConfig(configName)
+    if not writefile or not ensureFolder() then return false, "Filesystem not available" end
+    if not configName or configName == "" then return false, "No config name provided" end
+    
+    -- Sanitize config name
+    configName = configName:gsub("[^%w_%-]", "")
+    if configName == "" then return false, "Invalid config name" end
+    
+    local data = {
+        name = configName,
+        savedAt = os.time(),
+        timings = {},
+    }
+    
+    for animId, timing in pairs(parryTimings) do
+        data.timings[animId] = {
+            avgMs = timing.avgMs,
+            count = #timing.timings,
+            timings = timing.timings,
+        }
+    end
+    
+    local filePath = EXPORT_FOLDER .. "/" .. configName .. ".json"
+    local success, err = pcall(function()
+        local json = game:GetService("HttpService"):JSONEncode(data)
+        writefile(filePath, json)
+    end)
+    
+    if success then
+        currentConfigName = configName
+        local count = 0
+        for _ in pairs(parryTimings) do count = count + 1 end
+        print("[AnimLogger] Saved", count, "timings to config:", configName)
+        return true, configName
+    end
+    
+    return false, err or "Failed to write file"
+end
+
+-- Load from a named config file
+local function loadNamedConfig(configName)
+    if not readfile or not isfile then return false, "Filesystem not available" end
+    if not configName or configName == "" then return false, "No config name provided" end
+    
+    local filePath = EXPORT_FOLDER .. "/" .. configName .. ".json"
+    if not isfile(filePath) then return false, "Config not found: " .. configName end
+    
+    local success, err = pcall(function()
+        local json = readfile(filePath)
+        local data = game:GetService("HttpService"):JSONDecode(json)
+        
+        -- Clear existing timings before loading
+        parryTimings = {}
+        
+        local timingsData = data.timings or data -- Support old format
+        for animId, timing in pairs(timingsData) do
+            if type(timing) == "table" then
+                parryTimings[animId] = {
+                    avgMs = timing.avgMs or 0,
+                    timings = timing.timings or {},
+                }
+            end
+        end
+    end)
+    
+    if success then
+        currentConfigName = configName
+        local count = 0
+        for _ in pairs(parryTimings) do count = count + 1 end
+        print("[AnimLogger] Loaded", count, "timings from config:", configName)
+        return true, count
+    end
+    
+    return false, err or "Failed to read file"
+end
+
+-- Delete a named config
+local function deleteNamedConfig(configName)
+    if not delfile then return false, "Delete not available" end
+    if not configName or configName == "" then return false, "No config name" end
+    
+    local filePath = EXPORT_FOLDER .. "/" .. configName .. ".json"
+    local success = pcall(function()
+        delfile(filePath)
+    end)
+    
+    if success then
+        print("[AnimLogger] Deleted config:", configName)
+        if currentConfigName == configName then
+            currentConfigName = nil
+        end
+        return true
+    end
+    return false, "Failed to delete"
+end
+
+-- Legacy save (to parry_timings.json for backwards compatibility)
 local function saveParryTimings()
     if not writefile or not ensureFolder() then return false end
     
@@ -1582,6 +1723,52 @@ function AnimationLogger.setFilter(mode)
     if playerFilterButton then
         playerFilterButton.TextColor3 = showPlayersOnly and Color3.fromRGB(100, 255, 100) or Library.FontColor
     end
+end
+
+-- =============================================
+-- NAMED CONFIG MANAGEMENT
+-- =============================================
+
+-- Save current timings to a named config
+function AnimationLogger.saveConfig(configName)
+    return saveNamedConfig(configName)
+end
+
+-- Load timings from a named config
+function AnimationLogger.loadConfig(configName)
+    return loadNamedConfig(configName)
+end
+
+-- Delete a named config
+function AnimationLogger.deleteConfig(configName)
+    return deleteNamedConfig(configName)
+end
+
+-- List all available configs
+function AnimationLogger.listConfigs()
+    return listConfigs()
+end
+
+-- Get next available config name with prefix (e.g., "swin1", "swin2")
+function AnimationLogger.getNextConfigName(prefix)
+    return getNextConfigName(prefix or "swin")
+end
+
+-- Get current loaded config name
+function AnimationLogger.getCurrentConfig()
+    return currentConfigName
+end
+
+-- Quick save to auto-named config (swin1, swin2, etc.)
+function AnimationLogger.quickSave(prefix)
+    local name = getNextConfigName(prefix or "swin")
+    local success, result = saveNamedConfig(name)
+    if success then
+        if Library and not (shared.dxe and shared.dxe.silent) then
+            Library:Notify("Saved config: " .. name, 2)
+        end
+    end
+    return success, result
 end
 
 -- Return module
