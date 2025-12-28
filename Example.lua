@@ -1081,6 +1081,130 @@ ToolsGroup:AddToggle('FilterConsole', {
     Tooltip = 'Only show dxe script output, hide game spam'
 })
 
+-- Timing Config Management
+local TimingConfigGroup = Tabs['UI Settings']:AddRightGroupbox('Timing Configs')
+
+TimingConfigGroup:AddInput('TimingConfigName', {
+    Default = 'swin1',
+    Numeric = false,
+    Finished = false,
+    Text = 'Config Name',
+    Tooltip = 'Name for saving/loading timing configs (e.g., swin1, sword2)',
+    Placeholder = 'Enter config name...'
+})
+
+TimingConfigGroup:AddDropdown('TimingConfigList', {
+    Values = AnimationLogger.listConfigs and AnimationLogger.listConfigs() or {},
+    Default = 1,
+    Multi = false,
+    Text = 'Saved Configs',
+    Tooltip = 'Select a config to load',
+    AllowNull = true
+})
+
+TimingConfigGroup:AddButton({
+    Text = 'Quick Save (Auto Name)',
+    Func = function()
+        if AnimationLogger.quickSave then
+            local success, result = AnimationLogger.quickSave("swin")
+            if success then
+                Library:Notify("Saved config: " .. result, 2)
+                -- Refresh dropdown
+                Options.TimingConfigList:SetValues(AnimationLogger.listConfigs())
+                Options.TimingConfigName:SetValue(result)
+            else
+                Library:Notify("Failed to save: " .. (result or "unknown error"), 3)
+            end
+        end
+    end,
+    Tooltip = 'Save current timings to swin1, swin2, etc.'
+})
+
+TimingConfigGroup:AddButton({
+    Text = 'Save Config',
+    Func = function()
+        if AnimationLogger.saveConfig then
+            local name = Options.TimingConfigName.Value
+            if name == "" then
+                return Library:Notify("Enter a config name first", 2)
+            end
+            local success, result = AnimationLogger.saveConfig(name)
+            if success then
+                Library:Notify("Saved config: " .. name, 2)
+                -- Refresh dropdown
+                Options.TimingConfigList:SetValues(AnimationLogger.listConfigs())
+            else
+                Library:Notify("Failed to save: " .. (result or "unknown error"), 3)
+            end
+        end
+    end,
+    Tooltip = 'Save current timings with the entered name'
+})
+
+TimingConfigGroup:AddButton({
+    Text = 'Load Config',
+    Func = function()
+        if AnimationLogger.loadConfig then
+            local name = Options.TimingConfigList.Value
+            if not name or name == "" then
+                return Library:Notify("Select a config from the list", 2)
+            end
+            local success, count = AnimationLogger.loadConfig(name)
+            if success then
+                Library:Notify(string.format("Loaded %d timings from: %s", count or 0, name), 2)
+                Options.TimingConfigName:SetValue(name)
+            else
+                Library:Notify("Failed to load: " .. (count or "unknown error"), 3)
+            end
+        end
+    end,
+    Tooltip = 'Load timings from the selected config'
+})
+
+TimingConfigGroup:AddButton({
+    Text = 'Delete Config',
+    Func = function()
+        if AnimationLogger.deleteConfig then
+            local name = Options.TimingConfigList.Value
+            if not name or name == "" then
+                return Library:Notify("Select a config from the list", 2)
+            end
+            local success = AnimationLogger.deleteConfig(name)
+            if success then
+                Library:Notify("Deleted config: " .. name, 2)
+                -- Refresh dropdown
+                Options.TimingConfigList:SetValues(AnimationLogger.listConfigs())
+            else
+                Library:Notify("Failed to delete config", 3)
+            end
+        end
+    end,
+    Tooltip = 'Delete the selected config'
+})
+
+TimingConfigGroup:AddButton({
+    Text = 'Refresh List',
+    Func = function()
+        if AnimationLogger.listConfigs then
+            local configs = AnimationLogger.listConfigs()
+            Options.TimingConfigList:SetValues(configs)
+            Library:Notify("Found " .. #configs .. " configs", 2)
+        end
+    end,
+    Tooltip = 'Refresh the config list'
+})
+
+TimingConfigGroup:AddButton({
+    Text = 'Clear Current Timings',
+    Func = function()
+        if AnimationLogger.clearTimings then
+            AnimationLogger.clearTimings()
+            Library:Notify("Cleared all current timings", 2)
+        end
+    end,
+    Tooltip = 'Clear all timings in memory (does not delete saved configs)'
+})
+
 Toggles.AnimVisualizerToggle:OnChanged(function()
     AnimationVisualizer.visible(Toggles.AnimVisualizerToggle.Value)
 end)
