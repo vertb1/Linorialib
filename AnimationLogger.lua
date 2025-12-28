@@ -59,6 +59,12 @@ local TRUE_PARRY_PATTERNS = {
 local Library = nil
 local AnimationVisualizer = nil
 
+-- Settings
+AnimationLogger.Settings = {
+    autoRecordParryTimings = false, -- Disabled by default - only manual export
+    autoSaveOnParry = false, -- Don't auto-save to file when parrying
+}
+
 -- Track playback data with animation speed history (Lycoris-style)
 local PlaybackData = {}
 PlaybackData.__index = PlaybackData
@@ -482,6 +488,14 @@ end
 local function onLocalParry(parryAnimName)
     if not lastEnemyAttack then return end
     
+    -- Check if auto-recording is enabled
+    if not AnimationLogger.Settings.autoRecordParryTimings then
+        -- Just log that we parried, but don't record timing
+        print(string.format("[AnimLogger] Parried (auto-record disabled): %s's [%s]", 
+            lastEnemyAttack.entityName, lastEnemyAttack.animName or "Unknown"))
+        return
+    end
+    
     local timeSinceAttack = (os.clock() - lastEnemyAttack.startTime) * 1000 -- Convert to ms
     local enemyAnimId = lastEnemyAttack.animId
     local enemyAnimName = lastEnemyAttack.animName or "Unknown"
@@ -511,8 +525,10 @@ local function onLocalParry(parryAnimName)
         end
     end
     
-    -- Auto-save parry timings to file
-    saveParryTimings()
+    -- Auto-save parry timings to file (only if setting enabled)
+    if AnimationLogger.Settings.autoSaveOnParry then
+        saveParryTimings()
+    end
     
     -- Notify with animation name
     if Library and not (shared.dxe and shared.dxe.silent) then
