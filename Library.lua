@@ -3563,7 +3563,9 @@ local Toggles = {}
 		Library.Watermark.Size = UDim2.new(0, X + 15, 0, (Y * 1.5) + 3)
 	end
 
-	-- Watermark debug info update loop
+	-- Watermark debug info update loop (DISABLED - handled by script instead)
+	-- The script will manually update the watermark to prevent conflicts/glitching
+	--[[
 	do
 		local Stats = game:GetService("Stats")
 		local frameCount = 0
@@ -3619,6 +3621,7 @@ local Toggles = {}
 			end
 		end))
 	end
+	--]]
 
 	function Library:ManuallyManagedNotify(Text)
 		if shared.dxe.silent then
