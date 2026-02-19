@@ -59,6 +59,7 @@ local Toggles = {}
 		AccentColor = Color3.fromRGB(0, 85, 255),
 		OutlineColor = Color3.fromRGB(50, 50, 50),
 		RiskColor = Color3.fromRGB(255, 50, 50),
+		GrayColor = Color3.fromRGB(180, 180, 180),
 
 		Black = Color3.new(0, 0, 0),
 		Font = Font.fromEnum(Enum.Font.RobotoMono),
@@ -346,8 +347,11 @@ local Toggles = {}
 			-- Copy & blacklist.
 			label.InputBegan:Connect(function(Input)
 				if Input.UserInputType == Enum.UserInputType.MouseButton1 then
-					setclipboard(key)
-					Library:Notify(string.format("Copied key '%s' to clipboard.", key))
+					-- Convert to rbxassetid:// format
+					local assetId = key:match("%d+")
+					local copyKey = assetId and ("rbxassetid://" .. assetId) or key
+					setclipboard(copyKey)
+					Library:Notify(string.format("Copied '%s' to clipboard.", copyKey))
 				end
 
 				if Input.UserInputType == Enum.UserInputType.MouseButton2 then
@@ -3394,6 +3398,15 @@ local Toggles = {}
 		Library:AddToRegistry(InfoLoggerLabel, {
 			TextColor3 = "AccentColor",
 		}, true)
+
+		-- Click label to cycle through types
+		InfoLoggerLabel.Active = true
+		InfoLoggerLabel.InputBegan:Connect(function(Input)
+			if Input.UserInputType == Enum.UserInputType.MouseButton1 then
+				Library.InfoLoggerCycle = Library.InfoLoggerCycle % #Library.InfoLoggerCycles + 1
+				Library:RefreshInfoLogger()
+			end
+		end)
 
 		local InfoLoggerContainer = Library:Create("ScrollingFrame", {
 			BackgroundTransparency = 1,
