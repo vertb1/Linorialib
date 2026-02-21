@@ -1611,13 +1611,18 @@ local Toggles = {}
 				elseif
 					Input.UserInputType == Enum.UserInputType.MouseButton2 and not Library:MouseIsOverOpenedFrame()
 				then
-					-- Close all other ModeSelectFrames first
-					for _, Frame in next, ModeSelectFrames do
-						if Frame ~= ModeSelectOuter then
-							Frame.Visible = false
+					-- Toggle: if this menu is already visible, close it; otherwise close others and open this one
+					if ModeSelectOuter.Visible then
+						ModeSelectOuter.Visible = false
+					else
+						-- Close all other ModeSelectFrames first
+						for _, Frame in next, ModeSelectFrames do
+							if Frame ~= ModeSelectOuter then
+								Frame.Visible = false
+							end
 						end
+						ModeSelectOuter.Visible = true
 					end
-					ModeSelectOuter.Visible = true
 				end
 			end)
 
@@ -4132,6 +4137,11 @@ local Toggles = {}
 			function Tab:ShowTab()
 				for _, Tab in next, Window.Tabs do
 					Tab:HideTab()
+				end
+
+				-- Close all KeyPicker mode select menus when switching tabs
+				for _, Frame in next, ModeSelectFrames do
+					Frame.Visible = false
 				end
 
 				Blocker.BackgroundTransparency = 0
