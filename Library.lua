@@ -1611,6 +1611,12 @@ local Toggles = {}
 				elseif
 					Input.UserInputType == Enum.UserInputType.MouseButton2 and not Library:MouseIsOverOpenedFrame()
 				then
+					-- Close all other ModeSelectFrames first
+					for _, Frame in next, ModeSelectFrames do
+						if Frame ~= ModeSelectOuter then
+							Frame.Visible = false
+						end
+					end
 					ModeSelectOuter.Visible = true
 				end
 			end)
@@ -4616,511 +4622,453 @@ local Toggles = {}
 Players.PlayerAdded:Connect(OnPlayerChange)
 Players.PlayerRemoving:Connect(OnPlayerChange)
 
--- AnimationVisualizer Module
+-- AnimationVisualizer Module (matching original Lycoris design)
 Library.AnimationVisualizer = (function()
     local AnimationVisualizer = {
-        Frame = nil,
-        ViewportFrame = nil,
-        CurrentRig = nil,
-        CurrentTrack = nil,
-        CurrentAnimation = nil,
-        IsPlaying = false,
-        PlaybackSpeed = 1,
         Connections = {},
+        CurrentTrack = nil,
+        IsPaused = true,
+        TimeElapsed = 0,
     }
     
-    local TweenService = game:GetService("TweenService")
     local RunService = game:GetService("RunService")
-    local InsertService = game:GetService("InsertService")
+    local UserInputService = game:GetService("UserInputService")
+    local Players = game:GetService("Players")
+    
+    -- UI Elements (will be created on init)
+    local screenGui, outer, inner, viewportFrame, noViewportFrame
+    local sliderOuter, sliderFill, sliderInner, sliderText
+    local frameBackwards, playStop, frameForwards
+    local animationTextbox, textLabel, speedText
+    local worldModel, camera
+    local iconPlay, iconBack, iconForward
+    
+    local function mapSliderValue(value, min, max, minSize, maxSize)
+        return (1 - ((value - min) / (max - min))) * minSize + ((value - min) / (max - min)) * maxSize
+    end
     
     function AnimationVisualizer.init(lib)
-        if AnimationVisualizer.Frame then return end
+        if outer then return end
         
         local ScreenGui = lib.ScreenGui
         if not ScreenGui then return end
         
-        -- Main frame
-        local Frame = lib:Create("Frame", {
-            Name = "AnimationVisualizerFrame",
-            Parent = ScreenGui,
-            BackgroundColor3 = lib.MainColor,
-            BorderColor3 = lib.AccentColor,
-            BorderSizePixel = 1,
-            Position = UDim2.new(0, 20, 0.5, -200),
-            Size = UDim2.new(0, 350, 0, 400),
-            Visible = false,
-            ZIndex = 100,
-        })
-        AnimationVisualizer.Frame = Frame
-        Library.AnimationVisualizerFrame = Frame
+        screenGui = ScreenGui
         
-        -- Title bar
-        local TitleBar = lib:Create("Frame", {
-            Name = "TitleBar",
-            Parent = Frame,
-            BackgroundColor3 = lib.AccentColor,
-            BorderSizePixel = 0,
-            Size = UDim2.new(1, 0, 0, 25),
-            ZIndex = 101,
-        })
+        -- Outer frame (white border)
+        outer = Instance.new("Frame")
+        outer.Name = "AnimationVisualizerOuter"
+        outer.BackgroundColor3 = Color3.new(1, 1, 1)
+        outer.Position = UDim2.new(0.27, 0, 0.216, 0)
+        outer.BorderColor3 = Color3.new()
+        outer.Size = UDim2.new(0, 260, 0, 302)
+        outer.ZIndex = 100
+        outer.Visible = false
+        outer.Parent = ScreenGui
         
-        local TitleLabel = lib:Create("TextLabel", {
-            Name = "Title",
-            Parent = TitleBar,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 8, 0, 0),
-            Size = UDim2.new(1, -16, 1, 0),
-            Font = Enum.Font.Code,
-            Text = "Animation Visualizer",
-            TextColor3 = lib.FontColor,
-            TextSize = 14,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            ZIndex = 102,
-        })
+        AnimationVisualizer.Frame = outer
+        Library.AnimationVisualizerFrame = outer
+        
+        -- Inner frame
+        inner = Instance.new("Frame")
+        inner.Name = "Inner"
+        inner.BackgroundColor3 = Library.MainColor
+        inner.BorderMode = Enum.BorderMode.Inset
+        inner.BorderColor3 = Library.OutlineColor
+        inner.Size = UDim2.new(1, 0, 1, 0)
+        inner.Parent = outer
+        
+        -- Accent color bar at top
+        local colorBar = Instance.new("Frame")
+        colorBar.Name = "Color"
+        colorBar.BackgroundColor3 = Library.AccentColor
+        colorBar.BorderColor3 = Color3.new()
+        colorBar.BorderSizePixel = 0
+        colorBar.Size = UDim2.new(1, 0, 0, 2)
+        colorBar.Parent = inner
+        
+        -- Title
+        local titleLabel = Instance.new("TextLabel")
+        titleLabel.Name = "Title"
+        titleLabel.FontFace = Font.new("rbxasset://fonts/families/RobotoMono.json")
+        titleLabel.TextColor3 = Library.AccentColor
+        titleLabel.Text = "Animation Visualizer"
+        titleLabel.BackgroundTransparency = 1
+        titleLabel.Position = UDim2.new(0, 5, 0, 5)
+        titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+        titleLabel.TextSize = 17
+        titleLabel.Size = UDim2.new(1, 0, 0, 20)
+        titleLabel.Parent = inner
+        
+        -- Viewport frame
+        viewportFrame = Instance.new("ViewportFrame")
+        viewportFrame.Name = "ViewportFrame"
+        viewportFrame.Visible = false
+        viewportFrame.BorderMode = Enum.BorderMode.Inset
+        viewportFrame.LightColor = Color3.new(0.549, 0.525, 0.435)
+        viewportFrame.Ambient = Color3.new(0.318, 0.318, 0.318)
+        viewportFrame.Position = UDim2.new(0, 4, 0, 26)
+        viewportFrame.BackgroundColor3 = Library.MainColor
+        viewportFrame.BorderColor3 = Color3.new()
+        viewportFrame.Size = UDim2.new(1, -8, 0, 195)
+        viewportFrame.Parent = inner
+        
+        worldModel = Instance.new("WorldModel", viewportFrame)
+        
+        camera = Instance.new("Camera", viewportFrame)
+        camera.CameraType = Enum.CameraType.Scriptable
+        camera.FieldOfView = 70
+        viewportFrame.CurrentCamera = camera
+        
+        -- Speed text overlay on viewport
+        speedText = Instance.new("TextLabel")
+        speedText.Name = "SpeedText"
+        speedText.FontFace = Font.new("rbxasset://fonts/families/RobotoMono.json")
+        speedText.TextColor3 = Library.FontColor
+        speedText.Text = "Speed (???)"
+        speedText.BackgroundTransparency = 1
+        speedText.TextSize = 12
+        speedText.ZIndex = 19
+        speedText.Size = UDim2.new(0, 82, 0, 20)
+        speedText.Parent = viewportFrame
+        
+        -- No viewport frame (error message)
+        noViewportFrame = Instance.new("Frame")
+        noViewportFrame.Name = "NoViewportFrame"
+        noViewportFrame.BackgroundColor3 = Library.MainColor
+        noViewportFrame.Position = UDim2.new(0, 4, 0, 26)
+        noViewportFrame.BorderColor3 = Color3.new()
+        noViewportFrame.BorderMode = Enum.BorderMode.Inset
+        noViewportFrame.Size = UDim2.new(1, -8, 0, 195)
+        noViewportFrame.Parent = inner
+        
+        textLabel = Instance.new("TextLabel")
+        textLabel.Name = "TextLabel"
+        textLabel.FontFace = Font.new("rbxasset://fonts/families/RobotoMono.json")
+        textLabel.TextColor3 = Library.FontColor
+        textLabel.Text = "Waiting For Animation ID"
+        textLabel.BackgroundTransparency = 1
+        textLabel.Position = UDim2.new(0.5, -100, 0.5, -25)
+        textLabel.TextWrapped = true
+        textLabel.TextSize = 14
+        textLabel.Size = UDim2.new(0, 200, 0, 50)
+        textLabel.Parent = noViewportFrame
+        
+        -- Animation textbox
+        animationTextbox = Instance.new("TextBox")
+        animationTextbox.Name = "AnimationTextbox"
+        animationTextbox.TextColor3 = Library.FontColor
+        animationTextbox.Text = "rbxassetid://0"
+        animationTextbox.BackgroundColor3 = Library.MainColor
+        animationTextbox.Position = UDim2.new(0, 6, 0, 227)
+        animationTextbox.BorderColor3 = Color3.new()
+        animationTextbox.FontFace = Font.new("rbxasset://fonts/families/RobotoMono.json")
+        animationTextbox.TextSize = 14
+        animationTextbox.Size = UDim2.new(1, -12, 0, 15)
+        animationTextbox.Parent = inner
+        
+        -- Frame backwards button
+        frameBackwards = Instance.new("TextButton")
+        frameBackwards.Name = "FrameBackwards"
+        frameBackwards.Text = ""
+        frameBackwards.Position = UDim2.new(0, 6, 0, 249)
+        frameBackwards.BackgroundColor3 = Library.MainColor
+        frameBackwards.BorderColor3 = Color3.new()
+        frameBackwards.Size = UDim2.new(0, 70, 0, 20)
+        frameBackwards.Parent = inner
+        
+        iconBack = Instance.new("ImageLabel")
+        iconBack.Name = "Icon"
+        iconBack.ImageColor3 = Library.FontColor
+        iconBack.Image = "rbxassetid://10734961526"
+        iconBack.BackgroundTransparency = 1
+        iconBack.Position = UDim2.new(0.5, -8, 0.5, -8)
+        iconBack.Size = UDim2.new(0, 16, 0, 16)
+        iconBack.Parent = frameBackwards
+        
+        -- Play/Stop button
+        playStop = Instance.new("TextButton")
+        playStop.Name = "PlayStop"
+        playStop.Text = ""
+        playStop.Position = UDim2.new(0, 84, 0, 249)
+        playStop.BackgroundColor3 = Library.MainColor
+        playStop.BorderColor3 = Color3.new()
+        playStop.Size = UDim2.new(0, 91, 0, 20)
+        playStop.Parent = inner
+        
+        iconPlay = Instance.new("ImageLabel")
+        iconPlay.Name = "Icon"
+        iconPlay.ImageColor3 = Library.FontColor
+        iconPlay.Image = "rbxassetid://10734919336"
+        iconPlay.BackgroundTransparency = 1
+        iconPlay.Position = UDim2.new(0.5, -8, 0.5, -8)
+        iconPlay.Size = UDim2.new(0, 16, 0, 16)
+        iconPlay.Parent = playStop
+        
+        -- Frame forwards button
+        frameForwards = Instance.new("TextButton")
+        frameForwards.Name = "FrameForwards"
+        frameForwards.Text = ""
+        frameForwards.Position = UDim2.new(0, 183, 0, 249)
+        frameForwards.BackgroundColor3 = Library.MainColor
+        frameForwards.BorderColor3 = Color3.new()
+        frameForwards.Size = UDim2.new(0, 69, 0, 20)
+        frameForwards.Parent = inner
+        
+        iconForward = Instance.new("ImageLabel")
+        iconForward.Name = "Icon"
+        iconForward.ImageColor3 = Library.FontColor
+        iconForward.Image = "rbxassetid://10734961809"
+        iconForward.BackgroundTransparency = 1
+        iconForward.Position = UDim2.new(0.5, -8, 0.5, -8)
+        iconForward.Size = UDim2.new(0, 16, 0, 16)
+        iconForward.Parent = frameForwards
+        
+        -- Slider outer
+        sliderOuter = Instance.new("Frame")
+        sliderOuter.Name = "SliderOuter"
+        sliderOuter.BackgroundColor3 = Color3.new(1, 1, 1)
+        sliderOuter.Position = UDim2.new(0, 6, 0, 276)
+        sliderOuter.BorderColor3 = Color3.new()
+        sliderOuter.BorderSizePixel = 0
+        sliderOuter.Size = UDim2.new(1, -12, 0, 15)
+        sliderOuter.Parent = inner
+        
+        sliderText = Instance.new("TextLabel")
+        sliderText.Name = "SliderText"
+        sliderText.FontFace = Font.new("rbxasset://fonts/families/RobotoMono.json")
+        sliderText.TextColor3 = Library.FontColor
+        sliderText.Text = "0.000 / ??? (???ms)"
+        sliderText.BackgroundTransparency = 1
+        sliderText.TextSize = 12
+        sliderText.ZIndex = 12
+        sliderText.Size = UDim2.new(1, 0, 1, 0)
+        sliderText.Parent = sliderOuter
+        
+        sliderFill = Instance.new("Frame")
+        sliderFill.Name = "SliderFill"
+        sliderFill.BorderMode = Enum.BorderMode.Inset
+        sliderFill.BorderColor3 = Library.AccentColor
+        sliderFill.BackgroundColor3 = Library.AccentColor
+        sliderFill.Size = UDim2.new(0, 1, 1, 0)
+        sliderFill.ZIndex = 10
+        sliderFill.Visible = false
+        sliderFill.Parent = sliderOuter
+        
+        sliderInner = Instance.new("Frame")
+        sliderInner.Name = "SliderInner"
+        sliderInner.BorderColor3 = Color3.new()
+        sliderInner.BackgroundColor3 = Library.MainColor
+        sliderInner.Size = UDim2.new(1, 0, 1, 0)
+        sliderInner.Parent = sliderOuter
         
         -- Make draggable
-        lib:MakeDraggable(Frame, TitleBar)
+        Library:MakeDraggable(outer)
         
-        -- Viewport frame for 3D preview
-        local ViewportFrame = lib:Create("ViewportFrame", {
-            Name = "Viewport",
-            Parent = Frame,
-            BackgroundColor3 = Color3.fromRGB(30, 30, 30),
-            BorderSizePixel = 0,
-            Position = UDim2.new(0, 10, 0, 35),
-            Size = UDim2.new(1, -20, 0, 200),
-            ZIndex = 101,
-            Ambient = Color3.fromRGB(200, 200, 200),
-            LightColor = Color3.fromRGB(255, 255, 255),
-            LightDirection = Vector3.new(-1, -1, -1),
-        })
-        AnimationVisualizer.ViewportFrame = ViewportFrame
+        -- Register colors for theming
+        Library:AddToRegistry(colorBar, { BackgroundColor3 = "AccentColor" }, true)
+        Library:AddToRegistry(titleLabel, { TextColor3 = "AccentColor" }, true)
+        Library:AddToRegistry(inner, { BackgroundColor3 = "MainColor", BorderColor3 = "OutlineColor" }, true)
+        Library:AddToRegistry(viewportFrame, { BackgroundColor3 = "MainColor" }, true)
+        Library:AddToRegistry(noViewportFrame, { BackgroundColor3 = "MainColor" }, true)
+        Library:AddToRegistry(textLabel, { TextColor3 = "FontColor" }, true)
+        Library:AddToRegistry(speedText, { TextColor3 = "FontColor" }, true)
+        Library:AddToRegistry(animationTextbox, { BackgroundColor3 = "MainColor", TextColor3 = "FontColor" }, true)
+        Library:AddToRegistry(frameBackwards, { BackgroundColor3 = "MainColor" }, true)
+        Library:AddToRegistry(playStop, { BackgroundColor3 = "MainColor" }, true)
+        Library:AddToRegistry(frameForwards, { BackgroundColor3 = "MainColor" }, true)
+        Library:AddToRegistry(iconBack, { ImageColor3 = "FontColor" }, true)
+        Library:AddToRegistry(iconPlay, { ImageColor3 = "FontColor" }, true)
+        Library:AddToRegistry(iconForward, { ImageColor3 = "FontColor" }, true)
+        Library:AddToRegistry(sliderInner, { BackgroundColor3 = "MainColor" }, true)
+        Library:AddToRegistry(sliderFill, { BackgroundColor3 = "AccentColor", BorderColor3 = "AccentColor" }, true)
+        Library:AddToRegistry(sliderText, { TextColor3 = "FontColor" }, true)
         
-        -- Camera for viewport
-        local Camera = Instance.new("Camera")
-        Camera.CFrame = CFrame.new(0, 2, 8) * CFrame.Angles(math.rad(-10), 0, 0)
-        Camera.Parent = ViewportFrame
-        ViewportFrame.CurrentCamera = Camera
-        
-        -- Animation ID input
-        local AnimIdLabel = lib:Create("TextLabel", {
-            Name = "AnimIdLabel",
-            Parent = Frame,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 10, 0, 245),
-            Size = UDim2.new(0, 80, 0, 20),
-            Font = Enum.Font.Code,
-            Text = "Animation ID:",
-            TextColor3 = lib.FontColor,
-            TextSize = 12,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            ZIndex = 101,
-        })
-        
-        local AnimIdInput = lib:Create("TextBox", {
-            Name = "AnimIdInput",
-            Parent = Frame,
-            BackgroundColor3 = lib.MainColor,
-            BorderColor3 = lib.OutlineColor,
-            BorderSizePixel = 1,
-            Position = UDim2.new(0, 90, 0, 245),
-            Size = UDim2.new(1, -100, 0, 20),
-            Font = Enum.Font.Code,
-            PlaceholderText = "rbxassetid://...",
-            Text = "",
-            TextColor3 = lib.FontColor,
-            TextSize = 12,
-            ClearTextOnFocus = false,
-            ZIndex = 101,
-        })
-        
-        -- Load button
-        local LoadBtn = lib:Create("TextButton", {
-            Name = "LoadBtn",
-            Parent = Frame,
-            BackgroundColor3 = lib.AccentColor,
-            BorderSizePixel = 0,
-            Position = UDim2.new(0.5, -40, 0, 275),
-            Size = UDim2.new(0, 80, 0, 25),
-            Font = Enum.Font.Code,
-            Text = "Load",
-            TextColor3 = lib.FontColor,
-            TextSize = 12,
-            ZIndex = 101,
-        })
-        
-        -- Timeline slider
-        local SliderBg = lib:Create("Frame", {
-            Name = "SliderBg",
-            Parent = Frame,
-            BackgroundColor3 = lib.MainColor,
-            BorderColor3 = lib.OutlineColor,
-            BorderSizePixel = 1,
-            Position = UDim2.new(0, 10, 0, 310),
-            Size = UDim2.new(1, -20, 0, 10),
-            ZIndex = 101,
-        })
-        
-        local SliderFill = lib:Create("Frame", {
-            Name = "SliderFill",
-            Parent = SliderBg,
-            BackgroundColor3 = lib.AccentColor,
-            BorderSizePixel = 0,
-            Size = UDim2.new(0, 0, 1, 0),
-            ZIndex = 102,
-        })
-        
-        -- Playback controls
-        local ControlsFrame = lib:Create("Frame", {
-            Name = "Controls",
-            Parent = Frame,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 10, 0, 330),
-            Size = UDim2.new(1, -20, 0, 30),
-            ZIndex = 101,
-        })
-        
-        local PlayPauseBtn = lib:Create("TextButton", {
-            Name = "PlayPause",
-            Parent = ControlsFrame,
-            BackgroundColor3 = lib.AccentColor,
-            BorderSizePixel = 0,
-            Position = UDim2.new(0.5, -40, 0, 0),
-            Size = UDim2.new(0, 80, 0, 25),
-            Font = Enum.Font.Code,
-            Text = "▶ Play",
-            TextColor3 = lib.FontColor,
-            TextSize = 12,
-            ZIndex = 101,
-        })
-        
-        local FrameBackBtn = lib:Create("TextButton", {
-            Name = "FrameBack",
-            Parent = ControlsFrame,
-            BackgroundColor3 = lib.MainColor,
-            BorderColor3 = lib.OutlineColor,
-            BorderSizePixel = 1,
-            Position = UDim2.new(0.5, -80, 0, 0),
-            Size = UDim2.new(0, 35, 0, 25),
-            Font = Enum.Font.Code,
-            Text = "◀",
-            TextColor3 = lib.FontColor,
-            TextSize = 12,
-            ZIndex = 101,
-        })
-        
-        local FrameForwardBtn = lib:Create("TextButton", {
-            Name = "FrameForward",
-            Parent = ControlsFrame,
-            BackgroundColor3 = lib.MainColor,
-            BorderColor3 = lib.OutlineColor,
-            BorderSizePixel = 1,
-            Position = UDim2.new(0.5, 45, 0, 0),
-            Size = UDim2.new(0, 35, 0, 25),
-            Font = Enum.Font.Code,
-            Text = "▶",
-            TextColor3 = lib.FontColor,
-            TextSize = 12,
-            ZIndex = 101,
-        })
-        
-        -- Speed control
-        local SpeedLabel = lib:Create("TextLabel", {
-            Name = "SpeedLabel",
-            Parent = Frame,
-            BackgroundTransparency = 1,
-            Position = UDim2.new(0, 10, 0, 365),
-            Size = UDim2.new(0, 50, 0, 20),
-            Font = Enum.Font.Code,
-            Text = "Speed:",
-            TextColor3 = lib.FontColor,
-            TextSize = 12,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            ZIndex = 101,
-        })
-        
-        local SpeedButtons = {"0.25x", "0.5x", "1x", "2x", "4x"}
-        local SpeedValues = {0.25, 0.5, 1, 2, 4}
-        
-        for i, speed in ipairs(SpeedButtons) do
-            local btn = lib:Create("TextButton", {
-                Name = "Speed" .. speed,
-                Parent = Frame,
-                BackgroundColor3 = i == 3 and lib.AccentColor or lib.MainColor,
-                BorderColor3 = lib.OutlineColor,
-                BorderSizePixel = 1,
-                Position = UDim2.new(0, 60 + (i-1) * 55, 0, 365),
-                Size = UDim2.new(0, 50, 0, 20),
-                Font = Enum.Font.Code,
-                Text = speed,
-                TextColor3 = lib.FontColor,
-                TextSize = 11,
-                ZIndex = 101,
-            })
-            
-            btn.MouseButton1Click:Connect(function()
-                AnimationVisualizer.PlaybackSpeed = SpeedValues[i]
-                if AnimationVisualizer.CurrentTrack then
-                    AnimationVisualizer.CurrentTrack:AdjustSpeed(SpeedValues[i])
-                end
-                -- Update button colors
-                for j, s in ipairs(SpeedButtons) do
-                    local b = Frame:FindFirstChild("Speed" .. s)
-                    if b then
-                        b.BackgroundColor3 = j == i and lib.AccentColor or lib.MainColor
-                    end
-                end
-            end)
-        end
-        
-        -- Create dummy rig function
-        local function createDummyRig()
-            local rig = Instance.new("Model")
-            rig.Name = "AnimVisualizerRig"
-            
-            -- Create R6 rig
-            local torso = Instance.new("Part")
-            torso.Name = "Torso"
-            torso.Size = Vector3.new(2, 2, 1)
-            torso.CFrame = CFrame.new(0, 3, 0)
-            torso.Anchored = false
-            torso.CanCollide = false
-            torso.Parent = rig
-            
-            local head = Instance.new("Part")
-            head.Name = "Head"
-            head.Size = Vector3.new(1.2, 1.2, 1.2)
-            head.Shape = Enum.PartType.Ball
-            head.CFrame = CFrame.new(0, 4.5, 0)
-            head.Anchored = false
-            head.CanCollide = false
-            head.Parent = rig
-            
-            local hrp = Instance.new("Part")
-            hrp.Name = "HumanoidRootPart"
-            hrp.Size = Vector3.new(2, 2, 1)
-            hrp.CFrame = CFrame.new(0, 3, 0)
-            hrp.Transparency = 1
-            hrp.Anchored = true
-            hrp.CanCollide = false
-            hrp.Parent = rig
-            rig.PrimaryPart = hrp
-            
-            local leftArm = Instance.new("Part")
-            leftArm.Name = "Left Arm"
-            leftArm.Size = Vector3.new(1, 2, 1)
-            leftArm.CFrame = CFrame.new(-1.5, 3, 0)
-            leftArm.Anchored = false
-            leftArm.CanCollide = false
-            leftArm.Parent = rig
-            
-            local rightArm = Instance.new("Part")
-            rightArm.Name = "Right Arm"
-            rightArm.Size = Vector3.new(1, 2, 1)
-            rightArm.CFrame = CFrame.new(1.5, 3, 0)
-            rightArm.Anchored = false
-            rightArm.CanCollide = false
-            rightArm.Parent = rig
-            
-            local leftLeg = Instance.new("Part")
-            leftLeg.Name = "Left Leg"
-            leftLeg.Size = Vector3.new(1, 2, 1)
-            leftLeg.CFrame = CFrame.new(-0.5, 1, 0)
-            leftLeg.Anchored = false
-            leftLeg.CanCollide = false
-            leftLeg.Parent = rig
-            
-            local rightLeg = Instance.new("Part")
-            rightLeg.Name = "Right Leg"
-            rightLeg.Size = Vector3.new(1, 2, 1)
-            rightLeg.CFrame = CFrame.new(0.5, 1, 0)
-            rightLeg.Anchored = false
-            rightLeg.CanCollide = false
-            rightLeg.Parent = rig
-            
-            -- Create Motor6Ds
-            local function createMotor(name, part0, part1, c0, c1)
-                local motor = Instance.new("Motor6D")
-                motor.Name = name
-                motor.Part0 = part0
-                motor.Part1 = part1
-                motor.C0 = c0
-                motor.C1 = c1
-                motor.Parent = part0
-                return motor
+        -- Animation load function
+        local function loadAnimation()
+            local animId = animationTextbox.Text
+            if not animId or animId == "" or animId == "rbxassetid://0" then
+                return AnimationVisualizer.message("Invalid Animation ID")
             end
             
-            createMotor("Root", hrp, torso, CFrame.new(0, 0, 0), CFrame.new(0, 0, 0))
-            createMotor("Neck", torso, head, CFrame.new(0, 1, 0), CFrame.new(0, -0.5, 0))
-            createMotor("Left Shoulder", torso, leftArm, CFrame.new(-1, 0.5, 0), CFrame.new(0.5, 0.5, 0))
-            createMotor("Right Shoulder", torso, rightArm, CFrame.new(1, 0.5, 0), CFrame.new(-0.5, 0.5, 0))
-            createMotor("Left Hip", torso, leftLeg, CFrame.new(-0.5, -1, 0), CFrame.new(0, 1, 0))
-            createMotor("Right Hip", torso, rightLeg, CFrame.new(0.5, -1, 0), CFrame.new(0, 1, 0))
-            
-            local humanoid = Instance.new("Humanoid")
-            humanoid.Parent = rig
-            
-            local animator = Instance.new("Animator")
-            animator.Parent = humanoid
-            
-            return rig
-        end
-        
-        -- Load animation function
-        local function loadAnimation(animId)
-            -- Clear previous rig
-            if AnimationVisualizer.CurrentRig then
-                AnimationVisualizer.CurrentRig:Destroy()
-                AnimationVisualizer.CurrentRig = nil
+            -- Clear previous
+            for _, desc in next, worldModel:GetDescendants() do
+                if desc:IsA("Model") then desc:Destroy() end
             end
+            
             if AnimationVisualizer.CurrentTrack then
                 AnimationVisualizer.CurrentTrack:Stop()
                 AnimationVisualizer.CurrentTrack = nil
             end
             
-            -- Create new rig
-            local rig = createDummyRig()
-            rig.Parent = ViewportFrame
-            AnimationVisualizer.CurrentRig = rig
+            -- Try to clone player character
+            local localPlayer = Players.LocalPlayer
+            local character = localPlayer and localPlayer.Character
             
-            -- Load animation
-            local success, err = pcall(function()
-                local animation = Instance.new("Animation")
-                animation.AnimationId = animId
-                AnimationVisualizer.CurrentAnimation = animation
-                
-                local humanoid = rig:FindFirstChildOfClass("Humanoid")
-                local animator = humanoid:FindFirstChildOfClass("Animator")
-                
-                local track = animator:LoadAnimation(animation)
-                AnimationVisualizer.CurrentTrack = track
-                track:AdjustSpeed(0) -- Start paused
-                track:Play()
-                
-                AnimationVisualizer.IsPlaying = false
-                PlayPauseBtn.Text = "▶ Play"
+            if not character then
+                return AnimationVisualizer.message("No Character Found")
+            end
+            
+            local success, entity = pcall(function()
+                local oldArchivable = character.Archivable
+                character.Archivable = true
+                local clone = character:Clone()
+                character.Archivable = oldArchivable
+                return clone
             end)
             
-            if not success then
-                lib:Notify("Failed to load animation: " .. tostring(err), 3)
+            if not success or not entity then
+                return AnimationVisualizer.message("Failed to Clone Character")
             end
+            
+            entity.Parent = worldModel
+            entity:PivotTo(CFrame.new(0, 0, 0))
+            
+            local primaryPart = entity.PrimaryPart or entity:FindFirstChild("HumanoidRootPart")
+            if not primaryPart then
+                return AnimationVisualizer.message("No Primary Part Found")
+            end
+            
+            -- Setup camera
+            local _, bbs = entity:GetBoundingBox()
+            camera.CFrame = CFrame.lookAt(primaryPart.Position - Vector3.new(0, 0, bbs.Magnitude), primaryPart.Position)
+            
+            -- Find animator
+            local animator = entity:FindFirstChildWhichIsA("Animator", true)
+            if not animator then
+                return AnimationVisualizer.message("No Animator Found")
+            end
+            
+            -- Stop existing animations
+            for _, track in next, animator:GetPlayingAnimationTracks() do
+                track:Stop()
+            end
+            
+            -- Load animation
+            local animation = Instance.new("Animation")
+            animation.AnimationId = animId
+            
+            local loadSuccess, track = pcall(function()
+                return animator:LoadAnimation(animation)
+            end)
+            
+            if not loadSuccess or not track then
+                return AnimationVisualizer.message("Failed to Load Animation")
+            end
+            
+            AnimationVisualizer.CurrentTrack = track
+            track:Play(0.0, 100, 0.0)
+            track.Priority = Enum.AnimationPriority.Action
+            track.Looped = true
+            
+            AnimationVisualizer.IsPaused = true
+            AnimationVisualizer.TimeElapsed = 0
+            
+            viewportFrame.Visible = true
+            noViewportFrame.Visible = false
         end
         
         -- Button connections
-        LoadBtn.MouseButton1Click:Connect(function()
-            local animId = AnimIdInput.Text
-            if animId and animId ~= "" then
-                if not animId:match("rbxassetid://") then
-                    animId = "rbxassetid://" .. animId
-                end
-                loadAnimation(animId)
-            end
+        animationTextbox.FocusLost:Connect(function(enter)
+            if enter then loadAnimation() end
         end)
         
-        PlayPauseBtn.MouseButton1Click:Connect(function()
+        playStop.MouseButton1Click:Connect(function()
             if not AnimationVisualizer.CurrentTrack then return end
-            
-            if AnimationVisualizer.IsPlaying then
-                AnimationVisualizer.CurrentTrack:AdjustSpeed(0)
-                AnimationVisualizer.IsPlaying = false
-                PlayPauseBtn.Text = "▶ Play"
-            else
-                AnimationVisualizer.CurrentTrack:AdjustSpeed(AnimationVisualizer.PlaybackSpeed)
-                AnimationVisualizer.IsPlaying = true
-                PlayPauseBtn.Text = "⏸ Pause"
-            end
+            AnimationVisualizer.IsPaused = not AnimationVisualizer.IsPaused
         end)
         
-        FrameBackBtn.MouseButton1Click:Connect(function()
+        frameBackwards.MouseButton1Click:Connect(function()
             if not AnimationVisualizer.CurrentTrack then return end
-            local newTime = math.max(0, AnimationVisualizer.CurrentTrack.TimePosition - 0.033)
-            AnimationVisualizer.CurrentTrack.TimePosition = newTime
+            AnimationVisualizer.CurrentTrack.TimePosition = math.max(AnimationVisualizer.CurrentTrack.TimePosition - 0.01, 0)
         end)
         
-        FrameForwardBtn.MouseButton1Click:Connect(function()
+        frameForwards.MouseButton1Click:Connect(function()
             if not AnimationVisualizer.CurrentTrack then return end
-            local newTime = math.min(AnimationVisualizer.CurrentTrack.Length, AnimationVisualizer.CurrentTrack.TimePosition + 0.033)
-            AnimationVisualizer.CurrentTrack.TimePosition = newTime
+            AnimationVisualizer.CurrentTrack.TimePosition = math.min(AnimationVisualizer.CurrentTrack.TimePosition + 0.01, AnimationVisualizer.CurrentTrack.Length)
         end)
         
-        -- Timeline slider interaction
-        local draggingSlider = false
-        
-        SliderBg.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                draggingSlider = true
-            end
-        end)
-        
-        SliderBg.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                draggingSlider = false
-            end
-        end)
-        
-        -- Update loop
-        local conn = RunService.RenderStepped:Connect(function()
-            if not AnimationVisualizer.CurrentTrack then return end
+        -- Slider interaction
+        sliderOuter.InputBegan:Connect(function(input)
+            if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
             
-            local track = AnimationVisualizer.CurrentTrack
-            local progress = track.TimePosition / math.max(track.Length, 0.001)
-            SliderFill.Size = UDim2.new(math.clamp(progress, 0, 1), 0, 1, 0)
-            
-            if draggingSlider then
-                local mouse = game:GetService("Players").LocalPlayer:GetMouse()
-                local relativeX = (mouse.X - SliderBg.AbsolutePosition.X) / SliderBg.AbsoluteSize.X
-                relativeX = math.clamp(relativeX, 0, 1)
-                track.TimePosition = relativeX * track.Length
-            end
-            
-            -- Loop animation
-            if AnimationVisualizer.IsPlaying and track.TimePosition >= track.Length - 0.05 then
-                track.TimePosition = 0
+            while outer.Visible and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
+                if not AnimationVisualizer.CurrentTrack then break end
+                
+                AnimationVisualizer.IsPaused = true
+                
+                local mouse = Players.LocalPlayer:GetMouse()
+                local sliderSize = sliderOuter.AbsoluteSize.X
+                local mouseX = math.clamp(mouse.X - sliderOuter.AbsolutePosition.X, 0, sliderSize)
+                local newTime = mapSliderValue(mouseX, 0, sliderSize, 0, AnimationVisualizer.CurrentTrack.Length)
+                
+                AnimationVisualizer.CurrentTrack.TimePosition = newTime
+                RunService.PreRender:Wait()
             end
         end)
-        table.insert(AnimationVisualizer.Connections, conn)
         
         -- Keyboard shortcuts
-        local keyConn = game:GetService("UserInputService").InputBegan:Connect(function(input, processed)
-            if processed then return end
-            if not Frame.Visible then return end
-            
+        local keyConn = outer.InputBegan:Connect(function(input)
             if input.KeyCode == Enum.KeyCode.Space then
-                PlayPauseBtn.MouseButton1Click:Fire()
-            elseif input.KeyCode == Enum.KeyCode.Left then
-                FrameBackBtn.MouseButton1Click:Fire()
+                if AnimationVisualizer.CurrentTrack then
+                    AnimationVisualizer.IsPaused = not AnimationVisualizer.IsPaused
+                end
             elseif input.KeyCode == Enum.KeyCode.Right then
-                FrameForwardBtn.MouseButton1Click:Fire()
+                if AnimationVisualizer.CurrentTrack then
+                    AnimationVisualizer.CurrentTrack.TimePosition = math.min(AnimationVisualizer.CurrentTrack.TimePosition + 0.01, AnimationVisualizer.CurrentTrack.Length)
+                end
+            elseif input.KeyCode == Enum.KeyCode.Left then
+                if AnimationVisualizer.CurrentTrack then
+                    AnimationVisualizer.CurrentTrack.TimePosition = math.max(AnimationVisualizer.CurrentTrack.TimePosition - 0.01, 0)
+                end
             end
         end)
         table.insert(AnimationVisualizer.Connections, keyConn)
+        
+        -- Update loop
+        local updateConn = RunService.PreRender:Connect(function(delta)
+            if not outer.Visible then return end
+            
+            -- Update play/pause icon
+            iconPlay.Image = AnimationVisualizer.IsPaused and "rbxassetid://10734923549" or "rbxassetid://10734919336"
+            
+            local track = AnimationVisualizer.CurrentTrack
+            if not track then
+                sliderText.Text = "0.000 / ??? (???ms)"
+                speedText.Text = "Speed (???)"
+                return
+            end
+            
+            -- Update slider
+            local mhs = sliderOuter.AbsoluteSize.X
+            local hs = mapSliderValue(track.TimePosition, 0.0, track.Length, 0, mhs)
+            
+            sliderText.Text = string.format("%.3f / %.3f (%ims)", track.TimePosition, track.Length, math.round(track.TimePosition * 1000))
+            sliderFill.Visible = hs > 0
+            sliderFill.Size = UDim2.new(0, math.max(math.ceil(hs), 1), 1, 0)
+            
+            speedText.Text = string.format("Speed (%.2f)", track.Speed)
+            
+            if AnimationVisualizer.IsPaused then
+                track:AdjustSpeed(0)
+            else
+                AnimationVisualizer.TimeElapsed = AnimationVisualizer.TimeElapsed + delta
+                track:AdjustSpeed(1)
+            end
+        end)
+        table.insert(AnimationVisualizer.Connections, updateConn)
     end
     
     function AnimationVisualizer.visible(state)
-        if AnimationVisualizer.Frame then
-            AnimationVisualizer.Frame.Visible = state
+        if outer then
+            outer.Visible = state
         end
     end
     
     function AnimationVisualizer.message(msg)
-        -- Display a message in the visualizer (for animation info)
-        if Library and Library.Notify then
-            Library:Notify(msg, 3)
-        end
-    end
-    
-    function AnimationVisualizer.loadFromId(animId)
-        if AnimationVisualizer.Frame then
-            local input = AnimationVisualizer.Frame:FindFirstChild("AnimIdInput", true)
-            if input then
-                input.Text = animId
-            end
-            -- Trigger load
-            local loadBtn = AnimationVisualizer.Frame:FindFirstChild("LoadBtn", true)
-            if loadBtn then
-                loadBtn.MouseButton1Click:Fire()
-            end
-        end
+        if viewportFrame then viewportFrame.Visible = false end
+        if noViewportFrame then noViewportFrame.Visible = true end
+        if textLabel then textLabel.Text = msg end
     end
     
     function AnimationVisualizer.detach()
@@ -5134,14 +5082,9 @@ Library.AnimationVisualizer = (function()
             AnimationVisualizer.CurrentTrack = nil
         end
         
-        if AnimationVisualizer.CurrentRig then
-            AnimationVisualizer.CurrentRig:Destroy()
-            AnimationVisualizer.CurrentRig = nil
-        end
-        
-        if AnimationVisualizer.Frame then
-            AnimationVisualizer.Frame:Destroy()
-            AnimationVisualizer.Frame = nil
+        if outer then
+            outer:Destroy()
+            outer = nil
         end
     end
     
