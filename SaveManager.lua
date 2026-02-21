@@ -123,15 +123,29 @@ local function uDim2Import(serialized)
 
 			local data = {
 				objects = {},
-				keybindFramePosition = uDIm2Export(self.Library.KeybindFrame.Position),
-				watermarkFramePosition = uDIm2Export(self.Library.Watermark.Position),
-				infoLoggerFramePosition = uDIm2Export(self.Library.InfoLoggerFrame.Position),
-				infoLoggerBlacklistHistory = self.Library.InfoLoggerData.KeyBlacklistHistory,
-				infoLoggerBlacklist = self.Library.InfoLoggerData.KeyBlacklistList,
-				infoLoggerCycle = self.Library.InfoLoggerData.InfoLoggerCycle,
-				animationVisualizerFramePosition = uDIm2Export(self.Library.AnimationVisualizerFrame.Position),
-				overrideData = self.Library.OverrideData,
 			}
+			
+			-- Safely save optional frame positions (may not exist in all Library versions)
+			if self.Library.KeybindFrame then
+				data.keybindFramePosition = uDIm2Export(self.Library.KeybindFrame.Position)
+			end
+			if self.Library.Watermark then
+				data.watermarkFramePosition = uDIm2Export(self.Library.Watermark.Position)
+			end
+			if self.Library.InfoLoggerFrame then
+				data.infoLoggerFramePosition = uDIm2Export(self.Library.InfoLoggerFrame.Position)
+			end
+			if self.Library.InfoLoggerData then
+				data.infoLoggerBlacklistHistory = self.Library.InfoLoggerData.KeyBlacklistHistory
+				data.infoLoggerBlacklist = self.Library.InfoLoggerData.KeyBlacklistList
+				data.infoLoggerCycle = self.Library.InfoLoggerData.InfoLoggerCycle
+			end
+			if self.Library.AnimationVisualizerFrame then
+				data.animationVisualizerFramePosition = uDIm2Export(self.Library.AnimationVisualizerFrame.Position)
+			end
+			if self.Library.OverrideData then
+				data.overrideData = self.Library.OverrideData
+			end
 
 			for idx, toggle in next, Toggles do
 				if self.Ignore[idx] then
@@ -176,23 +190,24 @@ local function uDim2Import(serialized)
 				return false, "decode error"
 			end
 
-			if decoded.keybindFramePosition then
+			-- Safely load optional frame positions (may not exist in all Library versions)
+			if decoded.keybindFramePosition and self.Library.KeybindFrame then
 				self.Library.KeybindFrame.Position = uDim2Import(decoded.keybindFramePosition)
 			end
 
-			if decoded.watermarkFramePosition then
+			if decoded.watermarkFramePosition and self.Library.Watermark then
 				self.Library.Watermark.Position = uDim2Import(decoded.watermarkFramePosition)
 			end
 
-			if decoded.infoLoggerFramePosition then
+			if decoded.infoLoggerFramePosition and self.Library.InfoLoggerFrame then
 				self.Library.InfoLoggerFrame.Position = uDim2Import(decoded.infoLoggerFramePosition)
 			end
 
-			if decoded.infoLoggerBlacklistHistory then
+			if decoded.infoLoggerBlacklistHistory and self.Library.InfoLoggerData then
 				self.Library.InfoLoggerData.KeyBlacklistHistory = decoded.infoLoggerBlacklistHistory
 			end
 
-			if decoded.animationVisualizerFramePosition then
+			if decoded.animationVisualizerFramePosition and self.Library.AnimationVisualizerFrame then
 				self.Library.AnimationVisualizerFrame.Position = uDim2Import(decoded.animationVisualizerFramePosition)
 			end
 
@@ -218,17 +233,21 @@ local function uDim2Import(serialized)
 				end
 			end
 
-			if decoded.infoLoggerBlacklist then
+			if decoded.infoLoggerBlacklist and self.Library.InfoLoggerData then
 				self.Library.InfoLoggerData.KeyBlacklistList = decoded.infoLoggerBlacklist
-				self.Library:RefreshInfoLogger()
+				if self.Library.RefreshInfoLogger then
+					self.Library:RefreshInfoLogger()
+				end
 				if Options and Options.BlacklistedKeys then
 					Options.BlacklistedKeys:SetValues(self.Library:KeyBlacklists())
 				end
 			end
 
-			if decoded.infoLoggerCycle then
+			if decoded.infoLoggerCycle and self.Library.InfoLoggerData then
 				self.Library.InfoLoggerData.InfoLoggerCycle = decoded.infoLoggerCycle
-				self.Library:RefreshInfoLogger()
+				if self.Library.RefreshInfoLogger then
+					self.Library:RefreshInfoLogger()
+				end
 				if Options and Options.BlacklistedKeys then
 					Options.BlacklistedKeys:SetValues(self.Library:KeyBlacklists())
 				end
